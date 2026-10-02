@@ -7,7 +7,7 @@
   - 목표 지점이 어디인지 먼저 보는 단계
 
 ## 1단계: 장난감 API 정의 · 랩탑 · 반나절
-- [x] 공개 모델과 같은 함수 20개 + irrelevant_function 명세 (`data/android_functions.txt` → `src/toy_api.py`)
+- [x] 공개 모델과 같은 함수 20개 + irrelevant_function 명세 (`src/toy_api.py`)
 
 ## 2단계: 데이터 생성 · 랩탑 · 1~2일
 - [ ] LLM API로 `(질의 → <nexa_i>(args)<nexa_end>)` 쌍 생성
