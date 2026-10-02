@@ -9,6 +9,7 @@
 - 코드는 GitHub → Colab에서 `git clone`, 데이터·체크포인트는 Google Drive
 
 ## 진행 단계
+세부 체크리스트는 [PLAN.md](PLAN.md) 참고.
 | 단계 | 내용 | 환경 | 상태 |
 |---|---|---|---|
 | 0 | 공개 모델 `NexaAIDev/Octopus-v2` 추론 및 구조 관찰 | Colab | ⬜ |
