@@ -13,7 +13,7 @@
 | 단계 | 내용 | 환경 | 상태 |
 |---|---|---|---|
 | 0 | 공개 모델 `NexaAIDev/Octopus-v2` 추론 및 구조 관찰 | Colab | ⬜ |
-| 1 | 장난감 API 5~10개 정의 | 랩탑 | ⬜ |
+| 1 | 장난감 API 5~10개 정의 (`src/toy_api.py`) | 랩탑 | ✅ |
 | 2 | 데이터 생성 (positive + negative) 및 검증 | 랩탑 | ⬜ |
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking | 랩탑 | ⬜ |
 | 4 | 학습 (Qwen2.5-0.5B → Gemma-2B, LoRA) | Colab | ⬜ |
