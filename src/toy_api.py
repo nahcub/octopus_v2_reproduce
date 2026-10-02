@@ -3,7 +3,7 @@
 FUNCTIONS[i] 가 <nexa_i> 에 대응한다. 순서(=토큰 번호)는 공개 모델과 같아야 하므로 바꾸지 말 것.
 
 출처
-- <nexa_0> ~ <nexa_19>: data/android_functions.txt (Hugging Face 에서 받은 원본, 수정 금지).
+- <nexa_0> ~ <nexa_19>: data/android_functions.txt (HF 모델 카드 NexaAIDev/Octopus-v2 의 원본, 수정 금지).
   파일 안의 순서가 곧 토큰 번호다. 0단계 Colab 질의 출력에서 확인한 대응
   (0, 2, 3, 4, 7, 8, 10, 11, 12, 15, 16, 17, 19, 20번)과 모두 일치함.
 - <nexa_20> irrelevant_function: 파일에 없음. 공개 모델 출력 원문을 옮김.

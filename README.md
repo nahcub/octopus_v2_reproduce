@@ -35,3 +35,12 @@ Function description: {function_description}
 - LoRA: r=16, alpha=32, `q_proj, k_proj, v_proj, o_proj, up_proj, down_proj`
 - Weighted CE loss (특수 토큰 가중치↑)는 수렴만 빨라지고 최종 성능 차이 없음 → 벤치마크는 equal weight
 - 데이터 양: API당 100~1000개 권장 (Octopus-0~3: 1K full / 1K LoRA / 500 / 100)
+
+## 이 프로젝트에서 따르는 기준 (공개 모델 `NexaAIDev/Octopus-v2`)
+논문과 공개 모델이 다른 부분은 공개 모델(HF 모델 카드)을 따른다.
+- **프롬프트**: 모델 카드 예제 코드의 문구 그대로 (논문의 "choose" 대신 "call")
+  ```python
+  f"Below is the query from the users, please call the correct function and generate the parameters to call the function.\n\nQuery: {query} \n\nResponse:"
+  ```
+- **함수 명세**: 모델 카드의 `android_functions.txt` (20개) + `irrelevant_function` = `<nexa_0>` ~ `<nexa_20>`
+  → `data/android_functions.txt`, `src/toy_api.py`
