@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+# 대용량 산출물은 git이 아니라 Google Drive에 저장
+data/raw/
+data/processed/
+checkpoints/
+outputs/
+wandb/
+*.safetensors
+*.bin
