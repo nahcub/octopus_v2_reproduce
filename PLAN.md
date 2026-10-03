@@ -14,7 +14,8 @@
 - [x] Gemini 생성 파이프라인 (`src/datagen/`): 질의 → 인자 → 규칙 검사 + Gemini 검증 → 재생성
 - [x] 파일럿(2개 함수) → 2차(20개 함수 × 10)로 프롬프트 다듬기
   - 기계식 날짜 표기 금지, 호출어 금지, negative 범주 섞기, 이름·도시·전화번호 후보 목록(train/test 분리)
-- [ ] 전체 생성: train 4,000 (positive 2,000 + negative 2,000), test 800 (400 + 400)
+- [x] 전체 생성: train 4,000 (positive 2,000 + negative 2,000), test 800 (400 + 400). 비용 약 $4.4
+  - negative 는 중복·겹침 문제로 `negatives.py` 로 다시 생성 (test 의 train 겹침: negative 0%, positive 8%)
 - [ ] `data/train.jsonl`, `data/test.jsonl` 저장, 사람이 `review.csv` 로 표본 검토
 
 ## 3단계: 전처리 파이프라인 · 랩탑 (CPU로 충분) · 1일

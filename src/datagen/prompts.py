@@ -46,6 +46,40 @@ NEGATIVE_CATEGORIES = [
     "security camera",
 ]
 
+# 범주별 세부 주제 (NEGATIVE_CATEGORIES 와 같은 순서). 같은 범주로 수십 번 부르면 Gemini 가 뻔한 질문
+# ("프랑스 수도는?")을 반복해서, 학습용 negative 의 42% 가 중복이었다. 배치마다 세부 주제를 돌려 가며 준다.
+# 지원 함수와 경계가 애매한 주제(시간을 정한 리마인더, 진동 모드 등)는 넣지 않았다.
+NEGATIVE_SUBTOPICS = [
+    ["history", "geography", "space and astronomy", "animals and nature", "the human body", "famous people",
+     "inventions and technology history", "sports trivia", "music and film trivia", "words and languages",
+     "world records", "origins of foods and traditions"],
+    ["tips and discounts", "currency conversion", "cooking measurements", "temperature unit conversion",
+     "distance and speed", "percentages and fractions", "mental arithmetic", "area and volume",
+     "loans, savings, and interest", "weight units", "counting days between dates", "splitting a bill"],
+    ["greetings and goodbyes", "questions about the assistant itself", "jokes and riddles",
+     "sharing feelings or asking for encouragement", "favorite things", "thank-yous and compliments",
+     "random curious questions to the assistant", "boredom and wanting to chat"],
+    ["restaurants and food", "travel destinations", "books", "movies and TV shows to watch", "fitness routines",
+     "health symptoms", "gift ideas", "fashion and clothing", "personal finance", "study and productivity tips",
+     "relationships and social situations", "home cleaning and organizing", "pet care", "gardening"],
+    ["poems", "short stories", "summarizing a topic", "translating a phrase", "cover letters and resumes",
+     "toasts and speeches", "social media captions", "product descriptions", "song lyrics", "slogans",
+     "essay outlines", "fixing grammar or rephrasing a sentence"],
+    ["Wi-Fi", "mobile data and hotspot", "flashlight", "airplane mode", "screen rotation", "battery saver",
+     "dark mode", "font and display size", "changing the ringtone sound", "turning Bluetooth on or off",
+     "location and GPS", "screenshots and screen recording", "storage cleanup", "app notifications",
+     "deleting or listing existing alarms", "reading messages or emails aloud", "missed calls and call history",
+     "editing or deleting contacts", "stopwatch"],
+    ["food delivery", "ride hailing", "online shopping", "banking and payments", "posting on social media",
+     "movie tickets", "restaurant reservations", "flights and hotels", "stock prices", "music on the phone itself",
+     "podcasts", "e-books and audiobooks", "notes and shopping lists", "language translation apps",
+     "fitness tracking apps"],
+    ["lights", "robot vacuum", "TV", "garage door", "security cameras", "sprinklers", "blinds and curtains",
+     "air purifier", "coffee maker", "washing machine and dryer", "oven", "smart plugs", "video doorbell",
+     "baby monitor", "fans"],
+]
+assert len(NEGATIVE_SUBTOPICS) == len(NEGATIVE_CATEGORIES)
+
 
 def _summary(fn: dict) -> str:
     """함수 이름 + docstring 첫 문장."""
@@ -78,15 +112,20 @@ Requirements:
 - Do not address the assistant with a wake word or name (no "Hey Google", "Hey phone", "Hey assistant", "Siri", etc.)."""
 
 
-def negative_queries(n: int, category: str) -> str:
+def negative_queries(n: int, category: str, subtopic: str | None = None, avoid: list[str] | None = None) -> str:
     supported = "\n".join(_summary(f) for f in SUPPORTED_FUNCTIONS)
+    extra = f"\n- Focus of this batch: {subtopic}." if subtopic else ""
+    if avoid:
+        extra += ("\n- These requests were already written. Write new ones that ask for something different, "
+                  "not the same request reworded:\n"
+                  + "\n".join(f"  * {q}" for q in avoid))
     return f"""You are creating training data for an on-device assistant. The assistant can ONLY do the following:
 {supported}
 
 Write {n} different requests that a smartphone user might say or type which CANNOT be handled by any of the functions above.
 
 Requirements:
-- Category for this batch: {category}.
+- Category for this batch: {category}.{extra}
 - Make them realistic things people ask a phone assistant. Vary wording and length.
 - English only. Each request is a single message from the user, not a dialogue.
 - Do not address the assistant with a wake word or name (no "Hey Google", "Hey phone", "Hey assistant", "Siri", etc.)."""

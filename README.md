@@ -61,6 +61,8 @@ Function description: {function_description}
 - (논문에 없는 추가) 이름·도시는 목록(`src/datagen/pools.py`)에서 균등하게 돌려 가며 후보로 주고, 전화번호는 코드로 생성.
   목록은 train/test 로 나눠서 test 의 이름·도시는 학습 때 한 번도 안 나온 값이 되게 함
 - 질의에 "Hey Google" 같은 호출어는 쓰지 않음 (모델 이름 미정)
+- (논문에 없는 추가) negative 는 train/test 를 따로 만들면 Gemini 가 같은 질문을 반복해 test 의 41% 가 train 과 겹쳤다.
+  그래서 범주 8개 × 세부 주제를 돌려 가며, 이미 만든 질의를 보여 주면서 하나의 풀(2,794개)로 만든 뒤 범주별로 고르게 나눈다 (`negatives.py`)
 - **한계**: 날짜는 질의에 연도까지 명시한다. 추론 프롬프트에 오늘 날짜가 없어서 "내일", "다음 주" 같은 상대 날짜는 정답을 정할 수 없기 때문.
   공개 모델도 이런 질의엔 임의 날짜를 출력한다.
 
@@ -71,7 +73,8 @@ cp .env.example .env          # GEMINI_API_KEY 채우기
 python -m src.datagen.generate --dry-run --functions create_calendar_event   # 프롬프트만 확인 (키 불필요)
 python -m src.datagen.generate --run train --split train --per-function 100 --negatives 2000 --seed 0
 python -m src.datagen.generate --run test  --split test  --per-function 20  --negatives 400  --seed 1
-python -m src.datagen.build_dataset --train-run train --test-run test
+python -m src.datagen.negatives --run negatives_v2 --train 2000 --test 400   # negative 는 하나의 풀에서 생성 후 분할
+python -m src.datagen.build_dataset --train-run train --test-run test --negatives-run negatives_v2
 ```
 - 단계별 결과는 `data/raw/<run>/` (질의, 검증 결과, 탈락 사유, 비용 기록, 사람 검토용 `review.csv`). 같은 `--run` 으로 다시 실행하면 끝난 단계는 건너뜀
 - 최종 파일 한 줄 형식:
@@ -80,4 +83,4 @@ python -m src.datagen.build_dataset --train-run train --test-run test
   ```
   `test.jsonl` 에는 `seen_in_train` (train 에 같은 질의가 있는지)이 추가된다.
   흔한 문장은 실사용에서도 반복되므로 빼지 않고 표시만 하고, 5단계에서 전체 점수와 `seen_in_train=false` 점수를 둘 다 본다
-- 파일 구성: `generate.py`(파이프라인) · `prompts.py`(Gemini 프롬프트) · `validate.py`(인자 규칙, 정답 문자열) · `pools.py`(이름·도시·전화번호 후보) · `llm.py`(Gemini 호출, 재시도, 비용 집계) · `build_dataset.py`(train/test 합치기)
+- 파일 구성: `generate.py`(파이프라인) · `prompts.py`(Gemini 프롬프트) · `validate.py`(인자 규칙, 정답 문자열) · `pools.py`(이름·도시·전화번호 후보) · `llm.py`(Gemini 호출, 재시도, 비용 집계) · `negatives.py`(negative 풀 생성·분할) · `build_dataset.py`(train/test 합치기)
