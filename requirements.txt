@@ -5,3 +5,7 @@ peft
 trl
 accelerate
 bitsandbytes
+
+# 2단계 데이터 생성 (랩탑)
+google-genai>=2.3.0
+python-dotenv
