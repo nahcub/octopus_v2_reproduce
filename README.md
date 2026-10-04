@@ -16,7 +16,7 @@
 | 0 | 공개 모델 `NexaAIDev/Octopus-v2` 추론 및 구조 관찰 (`notebooks/00_explore_octopus.ipynb`) | Colab | ✅ |
 | 1 | 함수 명세 21개 (공개 모델 기준, `src/toy_api.py`) | 랩탑 | ✅ |
 | 2 | 데이터 생성 (positive + negative) 및 검증 (`src/datagen/`) | 랩탑 | 🔄 |
-| 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking | 랩탑 | ⬜ |
+| 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | 🔄 |
 | 4 | 학습 (Gemma-2B) | Colab A100 | ⬜ |
 | 5 | 평가 (함수 선택/인자 정확도, latency) | Colab | ⬜ |
 | 6 | Ablation | Colab | ⬜ |
@@ -84,3 +84,15 @@ python -m src.datagen.build_dataset --train-run train --test-run test --negative
   `test.jsonl` 에는 `seen_in_train` (train 에 같은 질의가 있는지)이 추가된다.
   흔한 문장은 실사용에서도 반복되므로 빼지 않고 표시만 하고, 5단계에서 전체 점수와 `seen_in_train=false` 점수를 둘 다 본다
 - 파일 구성: `generate.py`(파이프라인) · `prompts.py`(Gemini 프롬프트) · `validate.py`(인자 규칙, 정답 문자열) · `pools.py`(이름·도시·전화번호 후보) · `llm.py`(Gemini 호출, 재시도, 비용 집계) · `negatives.py`(negative 풀 생성·분할) · `build_dataset.py`(train/test 합치기)
+
+## 전처리에서 정한 것 (3단계, `src/preprocess/`)
+**토큰 추가** (`tokens.py`, 확인: `python -m src.preprocess.tokens`)
+- `<nexa_0>`~`<nexa_20>`, `<nexa_end>` 22개를 공개 모델과 같은 방식(`special=True`, `normalized=False` 인 특수 토큰)으로 원래 사전 뒤에 붙인다
+- `google/gemma-2b` 토크나이저에 추가한 결과를 공개 모델 토크나이저와 비교: 크기 256,022, 토큰 번호 256000~256021, train 4,000개 토큰화 결과 모두 같음.
+  사전 전체에서 다른 건 우리 토큰과 무관한 255999번 이름 하나뿐 (지금 `gemma-2b`: `<unused99>`, 공개 모델: `<start_of_image>`)
+- 특수 토큰이라 `decode(..., skip_special_tokens=True)` 하면 `<nexa_*>` 가 지워진다 → 평가 때는 이 옵션을 끈다
+- Gemma-2B 는 임베딩이 256,000칸이라 256,022칸으로 늘린다 (`resize_embeddings`, 모델이 필요해서 4단계에서 실행)
+- **새 토큰 22칸의 시작값**: 논문에 초기화 방법이 적혀 있지 않다 (공개 모델에는 학습 후 값만 있어서 알 수 없음).
+  그래서 transformers 가 칸을 늘릴 때 넣는 기본값을 쓴다. 다른 방식(함수 설명 단어 벡터 평균 등)과의 비교는 6단계 ablation 에서 한다
+  - 논문 3.2절은 초기값 대신 학습으로 뜻을 배운다고 설명한다 (word2vec 처럼 주변 문맥으로. 타깃 뒤 `Function description` 이 그 문맥 역할을 한다는 건 추정)
+- **loss 가중치**: 논문 벤치마크 모델처럼 모든 토큰 가중치 1 (위 "논문에서 확인한 설정"의 Weighted CE loss 항목)

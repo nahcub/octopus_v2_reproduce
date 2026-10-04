@@ -19,7 +19,9 @@
 - [ ] `data/train.jsonl`, `data/test.jsonl` 저장, 사람이 `review.csv` 로 표본 검토
 
 ## 3단계: 전처리 파이프라인 · 랩탑 (CPU로 충분) · 1일
-- [ ] 토큰 추가
+- [x] 토큰 추가 (`src/preprocess/tokens.py`): 공개 모델 토크나이저와 비교해 같음을 확인
+  - 임베딩 크기 늘리기(`resize_embeddings`)는 모델이 필요해서 4단계에서 확인
+  - 새 토큰 시작값은 논문에 없어서 transformers 기본값 사용 (README "전처리에서 정한 것")
 - [ ] 프롬프트 포맷
 - [ ] loss masking
 - 모델 가중치 없이 토크나이저만 있으면 되므로 랩탑에서 디버깅 가능. 코드 수준의 이해는 대부분 이 단계에서 생긴다.
