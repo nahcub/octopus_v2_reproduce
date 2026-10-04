@@ -35,11 +35,18 @@
   - A100이라 4bit 양자화 없이 bf16으로 올린다
 - ⚠️ LoRA로 학습할 때 `modules_to_save=["embed_tokens", "lm_head"]` 꼭 넣기 (새로 추가한 토큰의 단어 뜻 칸도 학습해야 함)
 
-## 5단계: 평가 · Colab · 1일
-- [ ] 함수 선택 정확도
-- [ ] 인자 정확도 (`src/datagen/validate.py` 재사용)
-- [ ] 전체 점수와 `seen_in_train=false` 점수 비교 (외워서 맞히는지 확인)
-- [ ] 지연 시간
+## 5단계: 평가 · Colab(생성) + 랩탑(채점) · 1일
+- 코드는 `src/evaluate.py`: `generate`(GPU, test 800개 → `preds.jsonl`) / `score`(CPU, 채점). 노트북 `notebooks/05_eval.ipynb` 은 실행만
+- 비교 기준: 논문 표 1 Octopus-3 정확도 98.095%, 지연 0.38초 (A100, flash attention, 양자화 없음)
+- [x] `score` 작성 + 자체 점검 (`selftest`): 정답을 넣으면 100%, 일부러 망가뜨린 예측이 각 오류 종류로 분류되는지
+  - 형식 / 함수 선택 (다른 함수 · 호출 누락 · 불필요한 호출) / 인자 (규칙은 지킨 다른 값 · 규칙 위반, `validate.check_args` 재사용) / 전체 정확도
+  - 전체와 `seen_in_train=false` 를 나란히, 함수별 표, 오답 목록(`errors.csv`, 사람이 검토)
+  - (논문에 없는 추가) 느슨한 정확도: 문자열 인자의 대소문자·앞뒤 공백·끝 문장부호 무시. 대표 숫자는 엄격한 쪽
+- [x] `generate` 작성: batch 1, greedy, `<nexa_end>`/`<eos>` 에서 멈춤, `max_new_tokens=128` (정답 최대 70토큰. 4-6 칸의 64는 부족)
+  - 랩탑에서 `--tiny` 로 몇 개만 끝까지 도는지 확인 (랩탑은 설치된 TensorFlow 와 충돌해서 `USE_TF=0` 필요)
+- [ ] Colab: 우리 모델 800개 생성 + 지연 시간 (예열 후, `cuda.synchronize`, 토큰화~`<nexa_end>`, 중앙값·90%)
+- [ ] (논문에 없는 추가) Colab: 공개 모델 `NexaAIDev/Octopus-v2` 도 같은 test 로 생성 (기준점)
+- [ ] 랩탑: 채점, 오답 검토, README "평가에서 정한 것"·결과 기록
 
 ## 6단계: Ablation · Colab, 분석은 랩탑 · 2~3일
 - [ ] functional token 방식 vs 함수 이름을 텍스트로 생성하는 방식
