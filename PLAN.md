@@ -24,11 +24,11 @@
 - [ ] loss masking
 - 모델 가중치 없이 토크나이저만 있으면 되므로 랩탑에서 디버깅 가능. 코드 수준의 이해는 대부분 이 단계에서 생긴다.
 
-## 4단계: 학습 · Colab · 1~2일
-- [ ] Qwen2.5-0.5B + LoRA로 시작 (무료 T4 GPU로도 동작)
-- [ ] 동작 확인 후 Gemma-2B로 올리기
-  - T4에서는 QLoRA(4bit) 필요, L4나 A100(Colab Pro)이 있으면 훨씬 편함
-- ⚠️ 학습할 때 `modules_to_save=["embed_tokens", "lm_head"]` 꼭 넣기
+## 4단계: 학습 · Colab A100 · 1~2일
+- [ ] Gemma-2B(`google/gemma-2b`)로 학습: 논문·공개 모델과 같은 베이스 모델
+  - 목표는 가능한 한 논문과 비슷하게 재현하는 것이라 작은 모델로 먼저 해 보는 단계는 두지 않는다
+  - A100이라 4bit 양자화 없이 bf16으로 올린다
+- ⚠️ LoRA로 학습할 때 `modules_to_save=["embed_tokens", "lm_head"]` 꼭 넣기 (새로 추가한 토큰의 단어 뜻 칸도 학습해야 함)
 
 ## 5단계: 평가 · Colab · 1일
 - [ ] 함수 선택 정확도
