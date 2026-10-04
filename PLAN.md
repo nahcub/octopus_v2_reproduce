@@ -28,9 +28,9 @@
 
 ## 4단계: 학습 · Colab A100 · 1~2일
 - [x] 학습 코드 (`src/train.py`) + Colab 노트북 (`notebooks/04_train.ipynb`). 랩탑에서 `--tiny` 로 끝까지 도는 것 확인
-- [ ] 학습 전 점검 (`--check-only`): 칸 256000 → 256022, 처음 loss, GPU 메모리
-- [ ] 30 step 시험 학습 → 메모리 옵션 결정
-- [ ] Gemma-2B(`google/gemma-2b`) full fine-tuning 3 epoch: 논문 Octopus-3 조건 (함수당 100개 + full)
+- [x] 학습 전 점검 (`--check-only`): 칸 256000 → 256022, 처음 loss, GPU 메모리
+- [x] 30 step 시험 학습 → A100 80GB 에서 옵션 없이 됨 (최대 67.3 GiB)
+- [x] Gemma-2B(`google/gemma-2b`) full fine-tuning 3 epoch: 논문 Octopus-3 조건 (함수당 100개 + full)
   - 목표는 가능한 한 논문과 비슷하게 재현하는 것이라 작은 모델로 먼저 해 보는 단계는 두지 않는다
   - A100이라 4bit 양자화 없이 bf16으로 올린다
 - ⚠️ LoRA로 학습할 때 `modules_to_save=["embed_tokens", "lm_head"]` 꼭 넣기 (새로 추가한 토큰의 단어 뜻 칸도 학습해야 함)

@@ -17,7 +17,7 @@
 | 1 | 함수 명세 21개 (공개 모델 기준, `src/toy_api.py`) | 랩탑 | ✅ |
 | 2 | 데이터 생성 (positive + negative) 및 검증 (`src/datagen/`) | 랩탑 | 🔄 |
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
-| 4 | 학습 (Gemma-2B) | Colab A100 | ⬜ |
+| 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency) | Colab | ⬜ |
 | 6 | Ablation | Colab | ⬜ |
 
@@ -139,3 +139,8 @@ Function description:
 - 가중치는 fp32 로 두고 계산만 bf16 (작은 lr 의 갱신이 bf16 반올림에 묻히지 않게). 저장은 bf16
 - 중간 체크포인트는 저장하지 않는다 (full 학습은 옵티마이저 포함 수십 GB). 끝나면 모델·토크나이저·loss 기록을 같이 저장
 - 학습 코드는 `.py` 에 두고 노트북은 `git clone` 후 실행만 한다. 랩탑에서 작은 무작위 Gemma(`--tiny`)로 끝까지 도는지 먼저 확인
+- 결과 (`MyDrive/octopus_v2/runs/full`, 모델·토크나이저·`log_history.json`):
+  - 학습 전 loss: 정답 자리 평균 1.97, 그중 `<nexa_*>` 자리 20.3 (새 단어라 확률 거의 0), 나머지 1.70
+  - train loss 1.3 (10 step) → 0.05 (80) → 0.02 (1 epoch) → 0.004 (2 epoch) → 0.001~0.002 (3 epoch).
+    epoch 경계(250, 500)마다 한 번 더 떨어진다 = 본 문장을 다시 보며 외우는 효과도 섞임 → 일반화는 5단계 `seen_in_train=false` 로 확인
+  - test 6개 생성 (사진 3 + negative 3) 모두 정답과 글자까지 일치, `<nexa_end>` 에서 멈춤. 쉬운 함수만 본 것이라 정확도는 5단계에서
