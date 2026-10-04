@@ -22,8 +22,8 @@
 - [x] 토큰 추가 (`src/preprocess/tokens.py`): 공개 모델 토크나이저와 비교해 같음을 확인
   - 임베딩 크기 늘리기(`resize_embeddings`)는 모델이 필요해서 4단계에서 확인
   - 새 토큰 시작값은 논문에 없어서 transformers 기본값 사용 (README "전처리에서 정한 것")
-- [ ] 프롬프트 포맷
-- [ ] loss masking
+- [x] 프롬프트 포맷 (`src/preprocess/prompt.py`): 공개 모델 출력 모양에 맞춤, 산출물은 파일이 아니라 변환 함수
+- [x] loss masking (`src/preprocess/masking.py`): 문제 부분 labels 를 -100 으로, 묶음 만들 때 pad 도 -100
 - 모델 가중치 없이 토크나이저만 있으면 되므로 랩탑에서 디버깅 가능. 코드 수준의 이해는 대부분 이 단계에서 생긴다.
 
 ## 4단계: 학습 · Colab A100 · 1~2일

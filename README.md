@@ -16,7 +16,7 @@
 | 0 | 공개 모델 `NexaAIDev/Octopus-v2` 추론 및 구조 관찰 (`notebooks/00_explore_octopus.ipynb`) | Colab | ✅ |
 | 1 | 함수 명세 21개 (공개 모델 기준, `src/toy_api.py`) | 랩탑 | ✅ |
 | 2 | 데이터 생성 (positive + negative) 및 검증 (`src/datagen/`) | 랩탑 | 🔄 |
-| 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | 🔄 |
+| 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B) | Colab A100 | ⬜ |
 | 5 | 평가 (함수 선택/인자 정확도, latency) | Colab | ⬜ |
 | 6 | Ablation | Colab | ⬜ |
@@ -96,3 +96,35 @@ python -m src.datagen.build_dataset --train-run train --test-run test --negative
   그래서 transformers 가 칸을 늘릴 때 넣는 기본값을 쓴다. 다른 방식(함수 설명 단어 벡터 평균 등)과의 비교는 6단계 ablation 에서 한다
   - 논문 3.2절은 초기값 대신 학습으로 뜻을 배운다고 설명한다 (word2vec 처럼 주변 문맥으로. 타깃 뒤 `Function description` 이 그 문맥 역할을 한다는 건 추정)
 - **loss 가중치**: 논문 벤치마크 모델처럼 모든 토큰 가중치 1 (위 "논문에서 확인한 설정"의 Weighted CE loss 항목)
+
+**프롬프트 포맷** (`prompt.py`, 확인: `python -m src.preprocess.prompt`)
+- 문제 부분은 모델 카드 예제 코드 원문: `...call the function.
+
+Query: {query} 
+
+Response:`
+- 정답 부분: `" " + call + "
+
+Function description: 
+" + DESCRIPTIONS[token_id] + "
+
+" + <eos>`
+  - 0단계 공개 모델 출력 모양을 따랐다 (맨 앞 공백, `Function description: ` 뒤 줄바꿈, 끝의 `
+
+<eos>`). 학습 데이터도 이 모양이었다는 건 추정.
+    논문 3.1절 형식(줄바꿈 1개)과 다르며 공개 모델을 따른다
+  - 0단계 노트북의 공개 모델 출력 20개와 대조: 19개 일치 (끝까지 생성된 2개는 `<eos>` 까지 완전 일치).
+    나머지 1개는 공개 모델이 `<nexa_1>` 뒤에 다른 함수 설명을 쓴 모델 쪽 실수
+  - 정답에 `Function description` 을 넣는다 (논문·공개 모델 둘 다). 빼는 버전은 6단계 ablation
+- 이걸 맞추다가 `toy_api.py` 의 `irrelevant_function` 설명에서 빈 줄의 공백 2칸이 빠진 걸 찾아 공개 모델 출력 원문대로 고쳤다
+- 문제와 정답을 따로 토큰으로 바꿔 이어 붙이고, 정답 시작 위치(`prompt_len`)를 남긴다 (3-3 loss masking 에서 사용).
+  글 전체를 한 번에 바꾼 결과와 train 4,000 / test 800 모두 같음
+- 변환된 데이터를 파일로 저장하지 않는다. 몇 초면 끝나서 학습 시작할 때 이 함수로 바로 바꾼다 (양식을 고쳤을 때 파일을 다시 만드는 걸 잊는 실수 방지)
+- 길이 (Gemma 토큰, `<bos>`·`<eos>` 포함): train 최소 89 / 중앙 111 / 최대 351, test 최대 335
+
+**loss masking** (`masking.py`, 확인: `python -m src.preprocess.masking`)
+- `labels` = `input_ids` 복사 후 문제 부분(앞의 `prompt_len` 개)을 -100 으로 덮는다. -100 은 PyTorch `CrossEntropyLoss` 의 `ignore_index` 기본값
+- 채점 범위는 정답 전체: ` <nexa_N>(...)<nexa_end>` + `Function description` + `<eos>`. 가중치는 모두 1
+- `labels` 를 직접 한 칸 밀지 않는다 (transformers CausalLM 이 안에서 민다)
+- 묶음은 오른쪽을 `<pad>` 로 채우고 pad 자리는 `labels` -100, `attention_mask` 0 (`collate`)
+- 확인: 채점 부분을 글자로 되돌리면 정답 글과 같음 (train 4,000 / test 800 모두), 채점 첫 토큰은 모두 `▁` 다음 `<nexa_N>`

@@ -259,14 +259,15 @@ DESCRIPTIONS: list[str] = [
     """''',
 
     # <nexa_20>
-    '''def irrelevant_function():
-  """
-  If user query is not related to any of the predefined functions, this function will be called.
-
-  Args:
-
-  Returns:
-  """''',
+    # 빈 줄에도 공백 2칸이 있다 (공개 모델 출력 원문). 편집기가 줄 끝 공백을 지우지 않도록 줄마다 \n 으로 적는다.
+    'def irrelevant_function():\n'
+    '  """\n'
+    '  If user query is not related to any of the predefined functions, this function will be called.\n'
+    '  \n'
+    '  Args:\n'
+    '  \n'
+    '  Returns:\n'
+    '  """',
 ]
 
 
