@@ -44,9 +44,9 @@
   - (논문에 없는 추가) 느슨한 정확도: 문자열 인자의 대소문자·앞뒤 공백·끝 문장부호 무시. 대표 숫자는 엄격한 쪽
 - [x] `generate` 작성: batch 1, greedy, `<nexa_end>`/`<eos>` 에서 멈춤, `max_new_tokens=128` (정답 최대 70토큰. 4-6 칸의 64는 부족)
   - 랩탑에서 `--tiny` 로 몇 개만 끝까지 도는지 확인 (랩탑은 설치된 TensorFlow 와 충돌해서 `USE_TF=0` 필요)
-- [ ] Colab: 우리 모델 800개 생성 + 지연 시간 (예열 후, `cuda.synchronize`, 토큰화~`<nexa_end>`, 중앙값·90%)
-- [ ] (논문에 없는 추가) Colab: 공개 모델 `NexaAIDev/Octopus-v2` 도 같은 test 로 생성 (기준점)
-- [ ] 랩탑: 채점, 오답 검토, README "평가에서 정한 것"·결과 기록
+- [x] Colab: 우리 모델 800개 생성 + 지연 시간 (예열 후, `cuda.synchronize`, 토큰화~`<nexa_end>`, 중앙값·90%)
+- [x] (논문에 없는 추가) Colab: 공개 모델 `NexaAIDev/Octopus-v2` 도 같은 test 로 생성 (기준점)
+- [x] 랩탑: 채점, 오답 검토, README "평가에서 정한 것"·결과 기록
 
 ## 6단계: Ablation · Colab, 분석은 랩탑 · 2~3일
 - [ ] functional token 방식 vs 함수 이름을 텍스트로 생성하는 방식
@@ -54,3 +54,6 @@
 - [ ] LoRA vs full fine-tuning (가능하면)
 - [ ] 학습 타깃에 `Function description` 을 붙이는 것 vs 안 붙이는 것 (논문은 붙이지만 효과를 따로 실험하지 않음)
 - [ ] negative 비율 (논문 1:1 vs 더 적게)
+- 5단계 오답에서 나온 후보 (논문에 없는 추가)
+  - [ ] 어포스트로피가 들어간 인자 학습 예시 늘리기 (train 42개 → test 11개 중 4개 형식 오류)
+  - [ ] 라벨 규칙 통일 (대소문자, 기기 이름·검색어 범위, 이메일 본문에 인사말 덧붙이지 않기) 후 다시 학습·평가
