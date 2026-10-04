@@ -49,12 +49,13 @@ def resize_embeddings(model, tokenizer) -> None:
 
     Gemma-2B 는 칸이 256,000개로 사전 크기와 딱 맞다 → 256,022개로 늘린다 (공개 모델과 같은 크기).
     모델에 따라 칸이 미리 넉넉한 경우도 있어서 (예: Qwen2.5-0.5B 는 사전 151,665개에 칸 151,936개) 모자랄 때만 늘린다.
-    새 칸을 어떤 값으로 채울지(초기화)는 아직 정하지 않았다. 지금은 transformers 기본값을 쓴다.
+    새 칸의 시작값: 논문에 없어서 transformers 기본값(mean_resizing=True)을 쓴다.
+    기존 단어 벡터들의 평균·공분산을 따르는 정규분포에서 뽑는다. 버전마다 기본값이 달라질 수 있어 직접 적는다.
     """
     need = len(tokenizer)
     have = model.get_input_embeddings().num_embeddings
     if need > have:
-        model.resize_token_embeddings(need)
+        model.resize_token_embeddings(need, mean_resizing=True)
 
 
 def main() -> None:

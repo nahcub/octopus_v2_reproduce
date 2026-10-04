@@ -93,7 +93,8 @@ python -m src.datagen.build_dataset --train-run train --test-run test --negative
 - 특수 토큰이라 `decode(..., skip_special_tokens=True)` 하면 `<nexa_*>` 가 지워진다 → 평가 때는 이 옵션을 끈다
 - Gemma-2B 는 임베딩이 256,000칸이라 256,022칸으로 늘린다 (`resize_embeddings`, 모델이 필요해서 4단계에서 실행)
 - **새 토큰 22칸의 시작값**: 논문에 초기화 방법이 적혀 있지 않다 (공개 모델에는 학습 후 값만 있어서 알 수 없음).
-  그래서 transformers 가 칸을 늘릴 때 넣는 기본값을 쓴다. 다른 방식(함수 설명 단어 벡터 평균 등)과의 비교는 6단계 ablation 에서 한다
+  그래서 transformers 가 칸을 늘릴 때 넣는 기본값(`mean_resizing=True`: 기존 단어 벡터들의 평균·공분산을 따르는 정규분포에서 뽑기)을 쓴다.
+  버전마다 기본값이 바뀔 수 있어 코드에 직접 적었다. 다른 방식(함수 설명 단어 벡터 평균 등)과의 비교는 6단계 ablation 에서 한다
   - 논문 3.2절은 초기값 대신 학습으로 뜻을 배운다고 설명한다 (word2vec 처럼 주변 문맥으로. 타깃 뒤 `Function description` 이 그 문맥 역할을 한다는 건 추정)
 - **loss 가중치**: 논문 벤치마크 모델처럼 모든 토큰 가중치 1 (위 "논문에서 확인한 설정"의 Weighted CE loss 항목)
 
@@ -128,3 +129,11 @@ Function description:
 - `labels` 를 직접 한 칸 밀지 않는다 (transformers CausalLM 이 안에서 민다)
 - 묶음은 오른쪽을 `<pad>` 로 채우고 pad 자리는 `labels` -100, `attention_mask` 0 (`collate`)
 - 확인: 채점 부분을 글자로 되돌리면 정답 글과 같음 (train 4,000 / test 800 모두), 채점 첫 토큰은 모두 `▁` 다음 `<nexa_N>`
+
+## 학습에서 정한 것 (4단계, `src/train.py`, `notebooks/04_train.ipynb`)
+- 조건: 함수당 100개 + full model training = 논문 표 2 의 **Octopus-3** (논문 표 1 정확도 98.1%)
+- 논문 3.4절 그대로: AdamW, lr 5e-5, warm-up 10 steps, linear scheduler, 3 epochs. loss 가중치 모두 1
+- (논문에 없는 추가) batch size 16 → 250 step/epoch, 총 750 step. weight decay 0
+- 가중치는 fp32 로 두고 계산만 bf16 (작은 lr 의 갱신이 bf16 반올림에 묻히지 않게). 저장은 bf16
+- 중간 체크포인트는 저장하지 않는다 (full 학습은 옵티마이저 포함 수십 GB). 끝나면 모델·토크나이저·loss 기록을 같이 저장
+- 학습 코드는 `.py` 에 두고 노트북은 `git clone` 후 실행만 한다. 랩탑에서 작은 무작위 Gemma(`--tiny`)로 끝까지 도는지 먼저 확인

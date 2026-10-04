@@ -7,6 +7,7 @@ data/raw/
 data/processed/
 checkpoints/
 outputs/
+runs/
 wandb/
 *.safetensors
 *.bin
