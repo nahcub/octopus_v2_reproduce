@@ -134,6 +134,8 @@ Function description:
 - 조건: 함수당 100개 + full model training = 논문 표 2 의 **Octopus-3** (논문 표 1 정확도 98.1%)
 - 논문 3.4절 그대로: AdamW, lr 5e-5, warm-up 10 steps, linear scheduler, 3 epochs. loss 가중치 모두 1
 - (논문에 없는 추가) batch size 16 → 250 step/epoch, 총 750 step. weight decay 0
+- GPU: Colab **A100 80GB** (고용량 RAM 런타임, 약 6.77 컴퓨팅 단위/시간). 40GB A100 에서는 일반 AdamW 가 메모리에 안 들어가서
+  (모델 9.3 + 기울기 9.3 + AdamW 18.7 GiB) 80GB 를 쓴다. 메모리 옵션 없이 batch 16 그대로, 최대 67.3 GiB, 약 1.6 step/초 (750 step ≈ 8분)
 - 가중치는 fp32 로 두고 계산만 bf16 (작은 lr 의 갱신이 bf16 반올림에 묻히지 않게). 저장은 bf16
 - 중간 체크포인트는 저장하지 않는다 (full 학습은 옵티마이저 포함 수십 GB). 끝나면 모델·토크나이저·loss 기록을 같이 저장
 - 학습 코드는 `.py` 에 두고 노트북은 `git clone` 후 실행만 한다. 랩탑에서 작은 무작위 Gemma(`--tiny`)로 끝까지 도는지 먼저 확인

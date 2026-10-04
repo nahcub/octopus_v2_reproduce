@@ -1,5 +1,5 @@
 torch
-transformers>=4.44
+transformers==4.56.2  # 랩탑·Colab 같은 버전 (5.x 는 API 변경)
 datasets
 peft
 trl
