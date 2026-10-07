@@ -155,6 +155,8 @@ Function description:
 - 지연 시간: 예열 5번 뒤, 토큰화 ~ 생성 끝 (`cuda.synchronize`), 모델 로드 제외. bf16, 양자화 없음, attention 은 sdpa
   (논문은 flash attention. 같은 계산 방식이지만 패키지가 다름)
 - (논문에 없는 추가) 기준점으로 공개 모델 `NexaAIDev/Octopus-v2` 도 같은 코드·같은 test 로 평가
+- (논문에 없는 추가) 오답 분석용으로 `src/probs.py` 가 같은 조건으로 다시 생성하며 단계마다 softmax 상위 5개 토큰·확률을
+  `probs.jsonl` 에 저장 (test 전체). 함수 토큰 앞에 공백 토큰이 올 수 있어 처음 함수 토큰을 고른 단계를 따로 기록
 - 평가 정답은 결과를 본 뒤 고치지 않는다 (점수를 맞추는 셈이 되므로). 라벨 문제는 아래처럼 기록만 한다
 
 **결과** (Colab A100 40GB, `MyDrive/octopus_v2/runs/eval/{ours,public}/`: `preds.jsonl`, `scored.jsonl`, `summary.json`, `errors.csv`)
