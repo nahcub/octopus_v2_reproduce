@@ -16,7 +16,7 @@ probs.jsonl 한 줄:
          p_irrelevant = dist[20] (<nexa_20> = irrelevant_function). 함수 토큰을 안 골랐으면 null
   same_as_preds: --preds 를 주면 다시 생성한 글이 preds.jsonl 의 output 과 같은지
 
-실행 (Colab GPU)
+실행 (Colab GPU). 우리 모델은 --model 에 학습한 폴더, 경로의 public 을 ours 로
     python -m src.probs generate --model NexaAIDev/Octopus-v2 --preds .../eval/public/preds.jsonl --out .../eval/public/probs.jsonl
     python -m src.probs report --probs .../eval/public/probs.jsonl --scored .../eval/public/scored.jsonl
 """
