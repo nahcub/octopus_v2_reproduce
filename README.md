@@ -15,7 +15,7 @@
 |---|---|---|---|
 | 0 | 공개 모델 `NexaAIDev/Octopus-v2` 추론 및 구조 관찰 (`notebooks/00_explore_octopus.ipynb`) | Colab | ✅ |
 | 1 | 함수 명세 21개 (공개 모델 기준, `src/toy_api.py`) | 랩탑 | ✅ |
-| 2 | 데이터 생성 (positive + negative) 및 검증 (`src/datagen/`) | 랩탑 | 🔄 |
+| 2 | 데이터 생성 (positive + negative) 및 검증 (`src/datagen/`) | 랩탑 | ✅ |
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) | Colab + 랩탑 | ✅ |

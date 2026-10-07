@@ -16,7 +16,7 @@
   - 기계식 날짜 표기 금지, 호출어 금지, negative 범주 섞기, 이름·도시·전화번호 후보 목록(train/test 분리)
 - [x] 전체 생성: train 4,000 (positive 2,000 + negative 2,000), test 800 (400 + 400). 비용 약 $4.4
   - negative 는 중복·겹침 문제로 `negatives.py` 로 다시 생성 (test 의 train 겹침: negative 0%, positive 8%)
-- [ ] `data/train.jsonl`, `data/test.jsonl` 저장, 사람이 `review.csv` 로 표본 검토
+- [x] `data/train.jsonl`, `data/test.jsonl` 저장, 사람이 `review.csv` 로 표본 검토
 
 ## 3단계: 전처리 파이프라인 · 랩탑 (CPU로 충분) · 1일
 - [x] 토큰 추가 (`src/preprocess/tokens.py`): 공개 모델 토크나이저와 비교해 같음을 확인
