@@ -11,3 +11,4 @@ runs/
 wandb/
 *.safetensors
 *.bin
+.venv/

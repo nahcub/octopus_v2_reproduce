@@ -1,0 +1,47 @@
+{
+ "holdout": [
+  "smart_home",
+  "writing"
+ ],
+ "val_frac": 0.1,
+ "seed": 0,
+ "counts": {
+  "train": {
+   "total": 3150,
+   "advice": 224,
+   "knowledge": 232,
+   "math": 212,
+   "other_apps": 226,
+   "phone_settings": 229,
+   "positive": 1800,
+   "small_talk": 227
+  },
+  "val": {
+   "total": 350,
+   "advice": 25,
+   "knowledge": 26,
+   "math": 24,
+   "other_apps": 25,
+   "phone_settings": 25,
+   "positive": 200,
+   "small_talk": 25
+  },
+  "test": {
+   "total": 800,
+   "advice": 50,
+   "knowledge": 50,
+   "math": 50,
+   "other_apps": 50,
+   "phone_settings": 50,
+   "positive": 400,
+   "small_talk": 50,
+   "smart_home": 50,
+   "writing": 50
+  },
+  "holdout": {
+   "total": 701,
+   "smart_home": 352,
+   "writing": 349
+  }
+ }
+}

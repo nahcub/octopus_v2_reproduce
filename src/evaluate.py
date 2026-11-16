@@ -230,6 +230,13 @@ def load_for_generation(name: str, tiny: bool):
         add_functional_tokens(tokenizer)
         model = load_model(name, tiny=True, vocab_size=len(tokenizer) - len(FUNCTIONAL_TOKENS))
         resize_embeddings(model, tokenizer)
+    elif (Path(name) / "adapter_config.json").exists():
+        # (논문에 없는 추가) 6단계 train_stage2.py 결과(LoRA 만 저장된 폴더): 모델 A 를 불러와 LoRA 를 합친다
+        from peft import PeftConfig, PeftModel
+
+        dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
+        base = AutoModelForCausalLM.from_pretrained(PeftConfig.from_pretrained(name).base_model_name_or_path, dtype=dtype)
+        model = PeftModel.from_pretrained(base, name).merge_and_unload()
     else:
         dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
         model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype)

@@ -266,3 +266,72 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
 **남은 것**
 - 사람 채점: 두 모델의 `errors.csv` 를 같은 기준으로 본다. 기준은 결과를 보기 전에 먼저 적는다
 - 공식 test 를 보고 train 을 고치면 공식 test 는 더 이상 공정한 시험이 아니다. 고친다면 제3의 test (다른 회사 LLM 이 논문·모델 카드만 보고 만든 것) 로 확인한다
+
+## 6단계 실험: 모르는 질문을 거절하게 만들기 (논문에 없는 추가, 브랜치 `exp/dpo-refusal`)
+**질문**: 학습 때 본 적 없는 종류의 질문에도 함수를 잘못 부르지 않고(오호출) `<nexa_20>()` 으로 거절하게 만들 수 있나?
+SFT 로 만든 모델 위에 DPO 를 더하면, 같은 양의 SFT 를 더한 것보다 나은가?
+
+**결과를 보기 전에 정한 것** (바꾸지 않는다)
+- hold-out 범주: `writing` (글쓰기·창작 = "명령이 아닌 말" 대표), `smart_home` (목록에 없는 스마트홈 = "명령 같지만 지원 안 함" 대표).
+  학습(1·2단계)과 val 에 전혀 넣지 않는다. `python -m src.holdout` → `data/holdout/`
+  - train 3,150 (positive 1,800 + negative 6개 범주 1,350) / val 350 (train 에서 10%, 함수별·범주별로 고르게) /
+    test 800 (원래 test 그대로 + `category`) / holdout 701 (hold-out 범주 negative 전부: 원래 train 500 + test 100 + 안 쓴 나머지 101)
+- 메인 지표: holdout·제3의 test 의 **오호출률**과 **AUROC** (거절 점수 s = 함수 토큰 21개 중 `<nexa_20>` 확률 비율, `src/threshold.py`)
+- 부작용 지표: test positive **과잉거절률** (불러야 할 때 거절), test 전체 정확도
+- lr 고르기: **val** 전체 정확도 (holdout 을 보고 고르면 시험 문제를 보고 공부하는 셈)
+
+**모델**
+| 모델 | 만드는 법 | 역할 |
+|---|---|---|
+| A | gemma-2b + 4단계 레시피 그대로 (full FT, lr 5e-5, 3 epoch, batch 16), `data/holdout/train.jsonl` | 기존 방법 |
+| A + τ | A 출력에 "s ≥ τ 이면 거절" 규칙만 추가. 학습 없음, τ 는 val 에서 | "임계값만 옮기면 되지 않나?" 에 답하는 기준선 |
+| B | A + LoRA SFT 1 epoch (chosen 만) | "학습을 더 해서 좋아진 것" 을 거르는 대조군 |
+| C | A + LoRA DPO 1 epoch (chosen vs rejected, β 0.1) | 제안 방법 |
+
+- B 와 C 는 같은 A 폴더, 같은 `pairs.jsonl`, 같은 seed(같은 순서)에서 출발한다. 다른 건 loss 하나
+- 2단계 공통: LoRA r16 α32 (논문 3.4절 모듈), AdamW, warm-up 10, linear, batch 16, 1 epoch
+- lr 후보 `{1e-5, 5e-5, 2e-4}` 를 B, C 모두 시도하고 각자 val 최고를 쓴다.
+  (처음 안의 `{1e-6, 5e-6, 2e-5}` 는 full FT 용 범위라 LoRA 1 epoch 로는 모델이 거의 안 변해서 바꿨다)
+- DPO rejected (`src/dpo_pairs.py`): negative 는 A 가 함수 토큰 자리에서 `<nexa_0~19>` 중 1등으로 고른 함수 + A 가 greedy 로 쓴 인자,
+  positive 는 `<nexa_20>()` (과잉거절 쪽으로 밀리지 않게). 새 질문은 만들지 않는다
+- seed 3개 (A 도 seed 마다 따로), 표는 평균 ± 표준편차
+- **해석 기준**: C 의 오호출이 B 보다 낮고, 과잉거절을 A + τ 와 똑같이 맞췄을 때(`--match-overrefusal`)도 C 의 오호출이 더 낮으면
+  "임계값으로는 못 하는 걸 DPO 가 했다". AUROC 가 A 보다 높은지도 본다 (임계값은 AUROC 를 못 바꾼다)
+
+**★ 진행 전 점검**: A 의 holdout 오호출률이 10% 미만이면 고칠 문제가 없어서 B, C 차이가 안 보인다 →
+`python -m src.holdout --holdout writing smart_home <범주 추가>` 로 늘리고 A 부터 다시
+
+**실행 순서** (Colab, `R=/content/drive/MyDrive/octopus_v2/runs`, seed 0 예시)
+```bash
+python -m src.train --train-file data/holdout/train.jsonl --seed 0 --output-dir $R/A_s0
+for s in val test holdout; do   # 평가 + 거절 점수 (A, B, C 모두 같은 방법)
+  python -m src.evaluate generate --model $R/A_s0 --test-file data/holdout/$s.jsonl --out $R/eval/A_s0/$s/preds.jsonl
+  python -m src.evaluate score --test-file data/holdout/$s.jsonl --preds $R/eval/A_s0/$s/preds.jsonl --out $R/eval/A_s0/$s
+  python -m src.probs generate --model $R/A_s0 --test-file data/holdout/$s.jsonl --out $R/eval/A_s0/$s/probs.jsonl
+done
+python -m src.threshold --val $R/eval/A_s0/val --eval test=$R/eval/A_s0/test holdout=$R/eval/A_s0/holdout   # ★ 점검 + A + τ
+python -m src.dpo_pairs --model $R/A_s0 --train-file data/holdout/train.jsonl --out $R/A_s0/pairs.jsonl
+python -m src.train_stage2 --mode sft --lr 5e-5 --seed 0 --model $R/A_s0 --pairs $R/A_s0/pairs.jsonl --output-dir $R/B_s0_lr5e-5
+python -m src.train_stage2 --mode dpo --lr 5e-5 --seed 0 --model $R/A_s0 --pairs $R/A_s0/pairs.jsonl --output-dir $R/C_s0_lr5e-5
+```
+- B, C 폴더에는 LoRA 만 저장된다 (수십 MB). `evaluate.py`·`probs.py` 는 `adapter_config.json` 이 있으면 A 를 불러와 LoRA 를 합친다.
+  그래서 A 폴더를 옮기거나 지우면 B, C 를 못 불러온다
+- A 는 하나에 약 5GB (bf16). seed 3개면 약 15GB 라 Drive 용량을 먼저 확인
+- 랩탑 확인 (작은 무작위 모델, CPU): `train --tiny` → `dpo_pairs` → `train_stage2` (sft, dpo) → `evaluate`/`probs` → `threshold` 까지 돈다.
+  DPO 첫 step loss 0.69315 (= log 2, A 와 같은 상태에서 시작) 확인. 무작위 모델은 올바른 호출을 못 써서 dpo_pairs 가 negative 를 전부 빼므로,
+  DPO 확인은 손으로 만든 짝으로 했다. CPU 에서 `--micro-batch 4` 는 메모리가 모자라 죽어서 `--micro-batch 1` 로 확인 (A100 에서는 4 로 충분할 것으로 추정)
+
+**학과 GPU PC 세팅** (Windows, RTX A6000 48GB × 2. Colab 대신 쓴다)
+- 48GB 라 1단계 full FT 는 레포 기본값(일반 AdamW, 최대 67GB)으로는 안 들어간다 →
+  `--optim adamw_bnb_8bit --gradient-checkpointing` 을 A seed 3개 모두에 똑같이 쓴다 (재현 모델과는 옵티마이저만 다름. A/B/C 비교의 공정성은 그대로)
+- GPU 1 은 화면 출력도 같이 한다 → 긴 학습은 GPU 0 부터. 두 장이면 seed 두 개를 동시에: `$env:CUDA_VISIBLE_DEVICES="0"` / `"1"`
+- 순서 (확인 전, 처음 세팅할 때 하나씩 확인하며 진행)
+  1. 가상환경 + GPU 용 PyTorch: `python -m venv .venv` → `.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cu128`
+     → `pip install -r requirements.txt` → `python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"`
+  2. `huggingface-cli login` 후 `google/gemma-2b` 접근 권한 확인 (모델 페이지에서 약관 동의가 필요할 수 있음)
+  3. `data/holdout/` 은 git 에 들어 있어서 다시 만들 필요 없다. hold-out 범주를 바꿀 때만 `python -m src.holdout` (`data/raw/negatives_v2/` 필요)
+  4. 시험 학습: `python -m src.train --train-file data/holdout/train.jsonl --optim adamw_bnb_8bit --gradient-checkpointing --max-steps 30 --output-dir runs/try`
+     → 최대 메모리·step 속도 확인. 메모리가 남으면 `--gradient-checkpointing` 을 빼 본다 (빠름)
+  5. 위 "실행 순서" 를 `R=runs` 로 (Drive 대신 로컬 디스크)
+
+**남은 것**: 제3의 test (다른 회사 LLM 으로 생성, 말투가 다른 negative + positive) 만들기
