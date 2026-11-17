@@ -20,6 +20,10 @@
     args:rule_violation     함수는 맞았지만 인자가 함수 설명의 규칙(validate.RULES)을 어김
     args:valid_but_different 함수는 맞았고 규칙도 지켰지만 정답과 다른 값
     correct                 함수와 인자가 정답과 같음 (값과 타입이 모두 같아야 함)
+    function_only           (BFCL 셋) score_args=false 문항에서 함수를 맞힘. 인자는 보지 않고 정답으로 센다
+
+- (논문에 없는 추가, BFCL 셋 `data/bfcl_test.jsonl`) test 줄에 `args_allowed` 가 있으면 인자마다 허용 값 중 하나와 같으면 정답.
+  `score_args: false` 면 함수 선택까지만 본다. 인자 정확도(args_acc)에서는 빠진다. 필드가 없는 기존 test 는 채점이 그대로다.
 
 - 생성된 글은 첫 <nexa_end> 까지만 본다 (그 뒤 Function description 은 채점하지 않음).
 - (논문에 없는 추가) 느슨한 정확도: 문자열 인자의 대소문자·연속 공백·앞뒤 공백·끝 문장부호(.!?)를 무시하고,
@@ -84,6 +88,11 @@ def same_args(a: dict, b: dict, lenient: bool = False) -> bool:
     return a.keys() == b.keys() and all(same_value(a[k], b[k], lenient) for k in a)
 
 
+def allowed_args(pred: dict, allowed: dict, lenient: bool = False) -> bool:
+    """(논문에 없는 추가, BFCL 셋) 인자마다 허용 값 리스트 중 하나와 같으면 정답."""
+    return pred.keys() == allowed.keys() and all(any(same_value(pred[k], v, lenient) for v in allowed[k]) for k in pred)
+
+
 def judge(row: dict, output: str) -> dict:
     """test 한 줄 + 생성된 글 → {"outcome", "pred_call", "pred_args", "rule_errors", "lenient_correct"}."""
     res = {"pred_call": extract_call(output), "pred_args": None, "rule_errors": [], "lenient_correct": False}
@@ -101,13 +110,21 @@ def judge(row: dict, output: str) -> dict:
         kind = "false_call" if gold == NEG_ID else "missed_call" if tid == NEG_ID else "other_function"
         return {**res, "outcome": f"function:{kind}"}
 
+    if row.get("score_args") is False:  # BFCL 셋: 정답 인자를 정할 수 없는 문항은 함수 선택까지만 본다
+        return {**res, "outcome": "function_only", "lenient_correct": True}
     params = FUNCTIONS[tid]["params"]
     args = dict(zip(params, pos)) | kw
     if len(pos) > len(params) or len(pos) + len(kw) != len(params) or set(args) != set(params):
         return {**res, "outcome": "args:count_mismatch"}
     res["pred_args"] = args
-    res["lenient_correct"] = same_args(args, row["args"], lenient=True)
-    if same_args(args, row["args"]):
+    allowed = row.get("args_allowed")
+    if allowed:
+        res["lenient_correct"] = allowed_args(args, allowed, lenient=True)
+        ok = allowed_args(args, allowed)
+    else:
+        res["lenient_correct"] = same_args(args, row["args"], lenient=True)
+        ok = same_args(args, row["args"])
+    if ok:
         return {**res, "outcome": "correct"}
     res["rule_errors"] = check_args(FUNCTIONS[tid]["name"], args)
     return {**res, "outcome": "args:rule_violation" if res["rule_errors"] else "args:valid_but_different"}
@@ -118,20 +135,21 @@ def summarize(scored: list[dict]) -> dict:
     n = len(scored)
     pos = [s for s in scored if s["kind"] == "positive"]
     neg = [s for s in scored if s["kind"] == "negative"]
-    func_ok = [s for s in scored if s["outcome"] == "correct" or s["outcome"].startswith("args:")]
-    pos_func_ok = [s for s in func_ok if s["kind"] == "positive"]
+    func_ok = [s for s in scored if s["outcome"] in ("correct", "function_only") or s["outcome"].startswith("args:")]
+    pos_func_ok = [s for s in func_ok if s["kind"] == "positive" and s["outcome"] != "function_only"]
 
     def rate(part, whole):
         return len(part) / len(whole) if whole else float("nan")
 
-    def acc(rows):
-        return rate([s for s in rows if s["outcome"] == "correct"], rows)
+    def acc(rows):  # function_only (인자 채점 제외 문항) 는 함수만 맞으면 정답
+        return rate([s for s in rows if s["outcome"] in ("correct", "function_only")], rows)
 
     return {
         "n": n,
         "format_ok": rate([s for s in scored if not s["outcome"].startswith("format:")], scored),
         "function_acc": rate(func_ok, scored),
-        "args_acc": acc(pos_func_ok),  # 함수를 맞힌 positive 중 인자까지 맞힌 비율
+        "function_acc_positive": rate([s for s in func_ok if s["kind"] == "positive"], pos),
+        "args_acc": acc(pos_func_ok),  # 함수를 맞힌 positive 중 인자까지 맞힌 비율 (인자 채점 제외 문항은 빼고)
         "acc": acc(scored),
         "acc_positive": acc(pos),
         "acc_negative": acc(neg),
@@ -145,6 +163,7 @@ METRIC_NAMES = {
     "n": "개수",
     "format_ok": "형식 OK",
     "function_acc": "함수 선택 정확도",
+    "function_acc_positive": "  positive 함수 선택",
     "args_acc": "인자 정확도 (함수 맞힌 positive 중)",
     "acc": "전체 정확도 ★",
     "acc_positive": "  positive",
@@ -186,6 +205,18 @@ def report(scored: list[dict]) -> dict:
         if rows:
             m = summarize(rows)
             print(f"  <nexa_{i}> {f['name']:<34}{m['n']:>6}{m['function_acc']:>10.1%}{m['acc']:>12.1%}")
+
+    # BFCL 셋: negative 유형별 거절 정확도, positive 말투별 함수 선택 정확도
+    for key, kind, metric, title in [("neg_type", "negative", "acc", "negative 유형별 (거절 정확도)"),
+                                     ("style", "positive", "function_acc", "positive 말투별 (함수 선택 정확도)")]:
+        groups = sorted({s.get(key) for s in scored if s["kind"] == kind and s.get(key)})
+        if groups:
+            print(f"\n[{title}]")
+            summary[f"by_{key}"] = {}
+            for g in groups:
+                m = summarize([s for s in scored if s.get(key) == g])
+                summary[f"by_{key}"][g] = {"n": m["n"], metric: m[metric]}
+                print(f"  {g:<34}{m['n']:>6}{m[metric]:>10.1%}")
 
     lat = [s["latency_s"] for s in scored if s.get("latency_s") is not None]
     if lat:
@@ -347,6 +378,26 @@ def selftest(test: list[dict]) -> None:
         assert (got["outcome"], got["lenient_correct"]) == (want, want_lenient), (output, got, want, want_lenient)
         print(f"[selftest] {want:<26} 느슨={str(want_lenient):<5} ← {output!r:.70}")
     print(f"[selftest] 통과 ({len(cases)}개 사례)")
+
+    # 2) BFCL 셋 필드: args_allowed (허용 값), score_args=false (함수만)
+    weather = {"kind": "positive", "function": "get_weather_forecast", "token_id": 2, "args": {"location": "London, UK"},
+               "args_allowed": {"location": ["London, UK", "London"]}, "score_args": True}
+    music = {"kind": "positive", "function": "play_music_on_nest_hub", "token_id": 17, "args": {}, "score_args": False}
+    bfcl_cases = [
+        (weather, "<nexa_2>('London')<nexa_end>", "correct", True),
+        (weather, "<nexa_2>('london')<nexa_end>", "args:valid_but_different", True),
+        (weather, "<nexa_2>('Paris')<nexa_end>", "args:valid_but_different", False),
+        (music, "<nexa_17>('Spotify', 'anything')<nexa_end>", "function_only", True),
+        (music, "<nexa_17>()<nexa_end>", "function_only", True),
+        (music, "<nexa_20>()<nexa_end>", "function:missed_call", False),
+    ]
+    for row, output, want, want_lenient in bfcl_cases:
+        got = judge(row, output)
+        assert (got["outcome"], got["lenient_correct"]) == (want, want_lenient), (output, got, want, want_lenient)
+        print(f"[selftest] {want:<26} 느슨={str(want_lenient):<5} ← {output!r:.70}")
+    m = summarize([{**r, "pred_call": None, "call": None, **judge(r, o)} for r, o, _, _ in bfcl_cases])
+    assert m["args_acc"] == 1 / 3 and m["function_acc_positive"] == 5 / 6, m
+    print(f"[selftest] BFCL 필드 통과 ({len(bfcl_cases)}개 사례)")
 
 
 def main() -> None:
