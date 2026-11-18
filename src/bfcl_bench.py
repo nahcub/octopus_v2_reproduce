@@ -116,11 +116,12 @@ def _tags(query: str) -> list[str]:
     return tags
 
 
-def merge() -> tuple[list[dict], Counter]:
-    """candidates + labels → 라벨 붙은 행 목록. 라벨 검사도 여기서."""
-    cands = {r["cid"]: r for r in load_jsonl(CANDIDATES)}
+def merge(candidates: Path = CANDIDATES, labels_path: Path = LABELS, src_key: str = "bfcl_id") -> tuple[list[dict], Counter]:
+    """candidates + labels → 라벨 붙은 행 목록. 라벨 검사도 여기서.
+    src_key: 원본 데이터의 문항 id 필드 이름 (BFCL "bfcl_id", MASSIVE "massive_id"). 후보에 "tags" 가 있으면 이어 붙인다."""
+    cands = {r["cid"]: r for r in load_jsonl(candidates)}
     labels = {}
-    for l in load_jsonl(LABELS):
+    for l in load_jsonl(labels_path):
         assert l["cid"] not in labels, f"duplicate label cid {l['cid']}"
         labels[l["cid"]] = l
     missing = sorted(set(cands) - set(labels))
@@ -136,9 +137,9 @@ def merge() -> tuple[list[dict], Counter]:
         tid = NAME_TO_INDEX[label]
         row = {"kind": "negative" if tid == NEG_ID else "positive", "function": label, "token_id": tid,
                "query": c["query"], "args": {}, "call": render_call(tid, {}) if tid == NEG_ID else None,
-               "seen_in_train": _norm(c["query"]) in train, "bfcl_id": c["bfcl_id"], "cid": cid,
+               "seen_in_train": _norm(c["query"]) in train, src_key: c[src_key], "cid": cid,
                "score_args": False, "args_allowed": None, "style": None, "neg_type": None,
-               "tags": _tags(c["query"]), "note": l.get("note", "")}
+               "tags": _tags(c["query"]) + c.get("tags", []), "note": l.get("note", "")}
         if tid == NEG_ID:
             assert l.get("neg_type") in NEG_TYPES, f"cid {cid}: bad neg_type {l.get('neg_type')}"
             row["neg_type"] = l["neg_type"]
@@ -188,20 +189,25 @@ def select(rows: list[dict]) -> list[dict]:
     return pos + neg
 
 
-def cmd_build(_args) -> None:
-    rows, stats = merge()
+def build(candidates: Path = CANDIDATES, labels_path: Path = LABELS, draft: Path = DRAFT, review: Path = REVIEW,
+          src_key: str = "bfcl_id") -> None:
+    rows, stats = merge(candidates, labels_path, src_key)
     chosen = select(rows)
-    write_jsonl(DRAFT, chosen)
-    with REVIEW.open("w", encoding="utf-8-sig", newline="") as f:
+    write_jsonl(draft, chosen)
+    with review.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["cid", "bfcl_id", "kind", "function", "call", "score_args", "args_allowed",
+        w.writerow(["cid", src_key, "kind", "function", "call", "score_args", "args_allowed",
                     "style", "neg_type", "tags", "query", "note", "OK(Y/N)", "fix"])
         for r in chosen:
-            w.writerow([r["cid"], r["bfcl_id"], r["kind"], r["function"], r["call"] or "", r["score_args"],
+            w.writerow([r["cid"], r[src_key], r["kind"], r["function"], r["call"] or "", r["score_args"],
                         json.dumps(r["args_allowed"], ensure_ascii=False) if r["args_allowed"] else "",
                         r["style"] or "", r["neg_type"] or "", ",".join(r["tags"]), r["query"], r["note"], "", ""])
     print(dict(stats))
     print_summary(rows, chosen)
+
+
+def cmd_build(_args) -> None:
+    build()
 
 
 def print_summary(rows: list[dict], chosen: list[dict]) -> None:
@@ -221,10 +227,10 @@ def print_summary(rows: list[dict], chosen: list[dict]) -> None:
     print("tags:", dict(Counter(t for r in chosen for t in r["tags"])))
 
 
-def cmd_finalize(_args) -> None:
+def finalize(draft: Path = DRAFT, review: Path = REVIEW, final: Path = FINAL) -> None:
     """review.csv 의 OK=N 줄은 fix 칸(JSON: 바꿀 필드)을 반영, fix 가 "exclude" 면 뺀다."""
-    rows = {r["cid"]: r for r in load_jsonl(DRAFT)}
-    with REVIEW.open(encoding="utf-8-sig") as f:
+    rows = {r["cid"]: r for r in load_jsonl(draft)}
+    with review.open(encoding="utf-8-sig") as f:
         for rec in csv.DictReader(f):
             if rec["OK(Y/N)"].strip().upper() != "N":
                 continue
@@ -241,8 +247,12 @@ def cmd_finalize(_args) -> None:
                 r["call"] = render_call(tid, r["args"])
             elif r["kind"] == "negative":
                 r["args"], r["call"] = {}, render_call(tid, {})
-    write_jsonl(FINAL, list(rows.values()))
-    print(f"wrote {FINAL} ({len(rows)} rows)")
+    write_jsonl(final, list(rows.values()))
+    print(f"wrote {final} ({len(rows)} rows)")
+
+
+def cmd_finalize(_args) -> None:
+    finalize()
 
 
 def main() -> None:
