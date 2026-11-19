@@ -163,6 +163,52 @@ positive 말투: 질문형 62, 명령형 55
   Colab 에서 생성(`preds.jsonl`)·확률(`probs.jsonl`)·채점까지 한다.
   검토로 라벨만 바뀌면 생성은 다시 할 필요 없이 다시 채점만 하면 된다.
 
+## 결과 (검토 전 초안 234개, 2026-11-18)
+Colab 에서 생성(`notebooks/07_eval_bfcl.ipynb`), 랩탑에서 같은 채점기로 다시 채점. 원본은 Drive `runs/eval_bfcl/`, 랩탑 복사본 `data/raw/eval_bfcl/`.
+라벨이 사용자 검토 전이라 숫자는 바뀔 수 있다. 괄호는 bootstrap 95% 신뢰구간.
+
+| | 우리 모델 | 공개 모델 |
+|---|---|---|
+| positive 함수 선택 (117) | **57.3%** (47.9~66.7) | **89.7%** (83.8~94.9) |
+| negative 거절 (117) | **93.2%** (88.0~97.4) | **35.9%** (27.4~45.3) |
+| 인자 정확도 (함수 맞힌 positive 중, 인자 채점 문항) | 84.8% | 74.1% |
+| 주된 실패 | 놓친 호출 45 | 잘못된 호출 70 |
+| AUROC (`<nexa_20>` 확률로 거절할 것/호출할 것 구분) | 0.884 | 0.925 |
+| 문턱값을 test 에서 최적으로 골랐을 때 균형 정확도 (낙관적 상한) | 0.752 → 0.808 | 0.628 → 0.868 |
+
+negative 유형별 거절 정확도
+
+| 유형 | 우리 | 공개 |
+|---|---|---|
+| calc_science | 95.8% | 29.2% |
+| chitchat_knowledge | 87.5% | 29.2% |
+| coding_tech | 91.3% | 69.6% |
+| unsupported_service | 91.3% | 34.8% |
+| near_miss | 78.3% | **17.4%** |
+
+positive 함수 선택: 함수별로 보면 우리 모델의 실패가 두 함수에 몰려 있다.
+
+| 함수 | 우리 | 공개 |
+|---|---|---|
+| play_music_on_nest_hub (30) | **3.3%** | 90.0% |
+| find_route_google_maps (15) | **26.7%** | 100% |
+| get_weather_forecast (30) | 93.3% | 96.7% |
+| set_timer_alarm (15) | 86.7% | 80.0% |
+| get_trending_news (12) | 91.7% | 91.7% |
+
+positive 말투별 함수 선택 (음악·경로 제외): 우리 질문형 90.7% (43) / 명령형 79.3% (29), 공개 질문형 93.0% / 명령형 79.3%
+
+### 해석
+- **교차 평가에서 본 "정반대 방향 실패"가 제3자 질의에서도 재현된다.** 우리 모델은 거절을 너무 많이 하고(놓친 호출 45), 공개 모델은 너무 적게 한다(잘못된 호출 70). 둘 다 자기 test 에서는 높았다.
+- **우리 모델의 놓친 호출은 "질문형이라서"가 아니다.** 음악·경로를 빼면 질문형이 오히려 더 잘 맞는다. 실패는 학습 positive 의 말투가 좁은 함수에 몰린다.
+  - 음악: 우리 train 의 음악 질의 98/100 이 서비스 이름(Spotify 등)과 "playlist", "Nest Hub" 를 말한다. BFCL 은 "play wrecking ball by Miley Cyrus" 처럼 곡명만 말한다 → 30개 중 29개 거절.
+    게다가 우리 negative 에 "Resume playing the current track on Apple Music" 같은 음악 관련 문장이 있다.
+  - 경로: 우리 train 경로 질의 100개 중 "distance / how long / fastest" 를 쓴 게 0개 ("plot a walking route ..."). negative 에는 "How long would it take to walk 8 miles ..." 가 있다 → "How long would it take to travel from Boston to New York by car?" 를 거절.
+  - 즉 **positive 와 negative 의 말투 경계를 외운다**는 가설과 맞는다 (추정, 통제 실험 전).
+- 공개 모델은 명령이 아닌 말(상식·계산·잡담)에 YouTube 검색(24번), 밝기(8번) 등을 부르고, near_miss(에어컨 → Nest 온도, 대기질 → 날씨) 는 17% 만 거절한다.
+- **"softmax 문턱값으로는 못 막는다"는 주장은 이 결과로는 약해진다.** 공개 모델은 `<nexa_20>` 확률의 순위만 보면 AUROC 0.925 로 꽤 잘 가른다. 다만 문턱값(0.006)을 test 로 고른 낙관적 숫자라, 다른 셋에서 고른 문턱값으로 다시 재야 한다.
+  잘못된 호출 70개 중 고른 함수 확률이 0.9 이상인 건 14개(20%), 0.5 이상 40개.
+
 ## 10. 다음 단계
 1. 사용자 검토: `data/raw/bfcl/review.csv` (234줄). 맞으면 `OK(Y/N)` 비우거나 Y, 틀리면 N 과 `fix` 칸에 고칠 내용 (JSON, 예: `{"function": "irrelevant_function", "neg_type": "near_miss"}`, 빼려면 `exclude`).
 2. `python -m src.bfcl_bench finalize` → `data/bfcl_test.jsonl` 확정.
