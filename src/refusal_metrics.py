@@ -45,20 +45,40 @@ def refusal_scores(probs: list[dict], n: int, score: str = "irr") -> list[float]
     irr: <nexa_20> 확률 (p_irrelevant)
     msp: 1 - (함수 토큰 <nexa_0>~<nexa_19> 중 가장 높은 확률). Maximum Softmax Probability (Hendrycks & Gimpel 2017).
          <nexa_20> 을 쓰지 않으므로 negative 없이 학습한 모델(실험 A00)에도 쓸 수 있다. 확률은 전체 사전 기준 (다시 정규화하지 않음)
-    두 점수 모두 함수 토큰을 한 번도 고르지 않은 출력(func 가 null)은 0 (거절 안 함) 으로 둔다
+    함수 토큰을 한 번도 고르지 않은 출력(func 가 null)
+    - irr: 0 (거절 안 함). 기존 규칙 그대로
+    - msp: 함수 토큰을 골랐어야 할 단계(공백이 아닌 첫 토큰)의 상위 k개에서 함수 토큰 최대 확률을 쓴다.
+           상위 k개에 함수 토큰이 없으면 k번째 확률을 상한으로 쓴다 (실제 점수보다 낮거나 같음 = 보수적).
+           (2026-11-22 추가: A00 은 negative 24개에서 목록에 없는 함수 이름을 지어내 `botanical('...')` 처럼 출력했다.
+            함수 토큰 확률이 낮았다는 뜻인데 0 으로 두면 "가장 확신한 호출" 로 세게 된다)
     """
     assert len(probs) == n, f"probs {len(probs)} != test {n} (생성이 끝나지 않았거나 다른 test 파일)"
     by_idx = {p["index"]: p for p in probs}
     out = []
     for i in range(n):
         f = by_idx[i].get("func")
-        if not f:
+        if not f and score == "msp":
+            out.append(1.0 - no_func_max(by_idx[i]))
+        elif not f:
             out.append(0.0)
         elif score == "irr":
             out.append(f.get("p_irrelevant") or 0.0)
         else:
             out.append(1.0 - max(f["dist"][:NEG_ID]))
     return out
+
+
+FUNC_TOKENS = {f"<nexa_{i}>" for i in range(NEG_ID)}
+
+
+def no_func_max(p: dict) -> float:
+    """함수 토큰을 안 고른 출력: 공백이 아닌 첫 단계의 상위 k개 중 함수 토큰 최대 확률 (없으면 k번째 확률)."""
+    steps = p.get("steps") or []
+    step = next((s for s in steps if s["token"].strip("▁ \n\r")), steps[0] if steps else None)
+    if not step:
+        return 0.0
+    in_top = [v for t, v in step["top"] if t in FUNC_TOKENS]
+    return max(in_top) if in_top else step["top"][-1][1]
 
 
 def p_irr(probs: list[dict], n: int) -> list[float]:

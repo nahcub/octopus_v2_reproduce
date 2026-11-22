@@ -19,7 +19,7 @@
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) + 공식 평가셋 교차 평가 (`src/official_bench.py`) | Colab + 랩탑 | ✅ |
-| 6 | Ablation. 첫 번째: 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`) | Colab | ⬜ |
+| 6 | Ablation. 첫 번째: 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음) | Colab | 🔄 |
 
 ## 0단계에서 확인한 것 (공개 모델)
 - 구조는 `GemmaForCausalLM`, vocab 256,022 = Gemma 256,000 + 특수 토큰 22개 (`<nexa_0>`~`<nexa_20>` = ID 256000~256020, `<nexa_end>` = 256021)
@@ -281,7 +281,21 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
   - 같은 채점을 기존 ours·공개 모델에도 한다 (`<nexa_20>` 확률과 MSP 둘 다). 차이의 95% 구간은 `src/refusal_metrics.py` (`--model 이름:msp`)
 - **결과 위치**: Drive `runs/A00/` (모델), `runs/eval/<모델>/`, `runs/eval_official/<모델>/` 의 `softmax_<점수>_scored.jsonl`(문항별), `softmax_<점수>_summary.json`
 - MASSIVE·BFCL 은 설계 문서 7절 규칙대로 모든 실험 모델이 정해진 뒤 채점한다
-- **결과**: (돌린 뒤 채움)
+- **결과** (2026-11-22, seed 0 한 번. 예측 대조는 EXPERIMENT_DESIGN.md 4.1절, 정리 아티팩트 https://claude.ai/artifact/514GReWrmTpqXKKBCxUQW5)
+
+  | | dev AUROC | dev greedy pos / neg | dev 문턱 적용 | 공식 210 AUROC | 공식 210 greedy pos | 공식 210 positive 거절 |
+  |---|---|---|---|---|---|---|
+  | A00 (MSP) | 0.991 | 89.8% / 0% | 88.5% | 0.998 | 75.5% | 0 / 200 |
+  | ours (`<nexa_20>`) | 1.000 | 88.8% / 99.8% | 90.1% | 0.994 | 67.5% | 17 / 200 |
+  | 공개 모델 (`<nexa_20>`) | 0.944 | 56.8% / 39.2% | 70.1% | 1.000 | 92.5% | 0 / 200 |
+
+  - "dev 문턱 적용" 은 dev positive 의 90% 가 통과하는 문턱값을 dev 에 그대로 쓴 값이라 낙관적이다
+  - negative 를 하나도 학습하지 않아도 같은 생성기 test 에서는 MSP 하나로 거의 다 가른다 (`<nexa_20>` 학습이 더해 준 AUROC 는 0.009)
+  - A00 이 dev 문턱값 뒤에도 호출한 negative 13개 중 12개가 near-miss (연락처 수정 → create_contact, 손전등 밝기 → 화면 밝기 등). 1개는 "volume" 단어만 겹친 수학 질문. 분류는 문항을 읽고 정함 (test 에 negative 유형 라벨 없음)
+  - greedy 로는 ours 가 공식 210 의 낯선 말투 positive 17개를 거절했고 A00 은 0개 (그중 12개는 A00 이 인자까지 정답). 단 A00 은 문턱이 있어야 거절할 수 있고, dev 문턱값을 옮겨 쓰면 A00 42개 / ours 65개를 거절한다. 과잉 거절이 줄어든 것이지 없어진 것은 아니다 (해석은 추정)
+  - dev 문턱값을 공식 210 에 옮기면 A00 positive 60%, ours 51% 만 통과. 문턱값 이식 실패는 확률 하나로 거절하는 방식의 공통 한계
+  - A00 은 모르는 요청에 함수 이름을 지어낸다 (`botanical('...')`, dev negative 24개). 이 경우의 MSP 점수 규칙을 결과를 본 뒤 고쳤다 (EXPERIMENT_DESIGN.md 10절). 노트북 09 출력은 고치기 전 숫자 (dev AUROC 0.931)
+  - 문항별 결과 랩탑 복사본: `data/raw/eval/A00/`, `data/raw/eval_official/{A00,ours,public}/` (`softmax_*_scored.jsonl`, `softmax_*.txt`)
 
 ## 이후 연구 (2부, 별도 저장소)
 2026-11-19 부터 함수 목록을 바꾼 통제 실험은 `../tool_calling_project` 에서 한다 (코드는 이 저장소 커밋 `8a00257` 에서 복사).

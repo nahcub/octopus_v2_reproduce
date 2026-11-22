@@ -6,7 +6,8 @@ evaluate score 는 greedy 출력만 본다. negative 없이 학습한 모델은 
 거절 점수 (refusal_metrics.py 와 같은 정의, 높을수록 거절 쪽)
 - irr: <nexa_20> 확률
 - msp: 1 - (함수 토큰 <nexa_0>~<nexa_19> 중 가장 높은 확률)  (Maximum Softmax Probability, Hendrycks & Gimpel 2017)
-- 함수 토큰을 한 번도 고르지 않은 출력은 점수 0 (거절 안 함)
+- 함수 토큰을 한 번도 고르지 않은 출력: irr 은 0 (거절 안 함), msp 는 그 단계 상위 k개의 함수 토큰 확률로 계산
+  (자세한 규칙은 refusal_metrics.refusal_scores)
 
 문턱값 t: --dev-probs 를 주면 dev(우리 test) positive 의 90% 가 거절되지 않게 dev 에서 정한다 (refusal_metrics 와 같은 방식).
          test 와 dev 가 같은 파일이면 dev 에서 정하고 dev 에 쓰는 것이라 낙관적인 숫자다 (화면에 표시).
@@ -117,7 +118,8 @@ def main() -> None:
     }
 
     print(f"test {a.test_file} (positive {len(pos)}, negative {len(neg)}) | 점수 {a.score} | 문턱값 t = {t:.4g} ({t_from})")
-    print(f"함수 토큰을 고르지 않은 출력: {summary['no_function_token']}개 (점수 0 으로 둠)\n")
+    rule = "점수 0 으로 둠" if a.score == "irr" else "그 단계 상위 k개의 함수 토큰 확률로 점수 계산"
+    print(f"함수 토큰을 고르지 않은 출력: {summary['no_function_token']}개 ({rule})\n")
     print(f"{'':<26}{'greedy':>10}{'문턱값 적용':>14}")
     for k, label in (("acc", "전체 정확도"), ("acc_positive", "  positive"), ("acc_negative", "  negative")):
         print(f"{label:<26}{summary['greedy'][k]:>10.2%}{summary['threshold_applied'][k]:>14.2%}")
