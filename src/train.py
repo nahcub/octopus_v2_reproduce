@@ -67,6 +67,9 @@ class OETrainer(Trainer):
     def __init__(self, *a, func_ids: list[int], oe_lambda: float, **kw):
         super().__init__(*a, **kw)
         self.func_ids, self.oe_lambda = func_ids, oe_lambda
+        # compute_loss 가 묶음 평균 loss 를 돌려주므로, --grad-accum 일 때 Trainer 가 누적 횟수로 나누게 한다.
+        # (True 로 두면 Trainer 는 모델이 num_items_in_batch 로 이미 나눴다고 보고 안 나눠서, 사실상 lr 이 누적 횟수배가 된다)
+        self.model_accepts_loss_kwargs = False
         self._parts = {"pos_loss": [], "oe_loss": []}
 
     def compute_loss(self, model, inputs, return_outputs=False, **kw):
@@ -131,6 +134,8 @@ def main() -> None:
                    help="negative 학습 방식. token: <nexa_20> 을 정답으로 (논문). "
                         "oe: 함수 토큰 20개가 고르게 (논문에 없는 추가, Outlier Exposure). 거절은 refusal_metrics 의 msp 로 본다")
     p.add_argument("--oe-lambda", type=float, default=0.5, help="oe loss 가중치 (Outlier Exposure 원 논문 값 0.5)")
+    p.add_argument("--exclude-neg-category", default=None,
+                   help="(논문에 없는 추가) 실험 X: 이 범주의 negative 를 학습에서 뺀다 (src/neg_categories.SHORT 중 하나)")
     p.add_argument("--output-dir", default="runs/full")
     p.add_argument("--epochs", type=float, default=3)
     p.add_argument("--lr", type=float, default=5e-5)
@@ -163,6 +168,13 @@ def main() -> None:
     rows = load_jsonl(Path(args.train_file))
     if args.only_kind:
         rows = [r for r in rows if r["kind"] == args.only_kind]
+    if args.exclude_neg_category:
+        from src.neg_categories import SHORT, load as load_neg_categories
+        assert args.exclude_neg_category in SHORT, f"범주 이름: {SHORT}"
+        cats = load_neg_categories()
+        before_n = len(rows)
+        rows = [r for r in rows if not (r["kind"] == "negative" and cats[r["query"]] == args.exclude_neg_category)]
+        print(f"[데이터] negative 범주 '{args.exclude_neg_category}' 제외: {before_n} → {len(rows)}개")
     rows = rows[: args.limit]
     oe = args.neg_loss == "oe"
     examples = [build_example(r, tokenizer, oe=oe) for r in rows]

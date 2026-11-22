@@ -145,6 +145,33 @@ step 수를 맞추면 이번에는 positive 를 보는 횟수가 달라지므로
 - 문턱값 이식 문제는 남는다 (확률 하나로 거절하는 방식의 공통 한계)
 - 매핑 가설 자체의 검증은 이 실험이 아니라 범주 하나를 뺀 학습 (A50 vs OE, 빠진 범주를 거절하는지) 으로 한다. 이 실험은 그 전 단계로 OE 가 같은 데이터에서 제대로 학습되는지 본다
 
+### 4.3 실험 X: negative 범주 하나 빼고 학습 — 매핑 가설 확인 (2026-11-22 추가, 논문에 없는 추가)
+
+- **매핑 가설**: `<nexa_20>` 으로 학습한 모델은 "함수 목록에 없음" 이라는 개념이 아니라 "학습 negative 에 나온 종류의 요청 → `<nexa_20>`" 을 외운다 (추정).
+  함수 토큰 모델은 추론 때 함수 목록을 입력으로 보지 않는다는 구조적 사실에서 나온 가설. 단 모델 안에는 20개 함수가 학습돼 있으므로 "20개 중 어디에도 안 맞음" 을 배울 수도 있다 → 실험으로 가른다
+- negative 8개 범주 중 하나를 학습에서 뺀다. 범주 라벨: `data/neg_categories.json` (생성 기록 `negatives_v2` 에서 만듦, train 2,000·test 400 전부 매칭, test 범주마다 50개)
+
+| 모델 | 뺀 범주 | negative 학습 |
+|---|---|---|
+| X_token_writing | writing (글쓰기·창작, 함수와 먼 범주) | `<nexa_20>` |
+| X_oe_writing | writing | OE (4.2절) |
+| X_token_smart_home | smart_home (지원 안 하는 스마트홈 기기, near-miss) | `<nexa_20>` |
+| X_oe_smart_home | smart_home | OE |
+| 비교: ours / OE | 없음 | 각 방식 |
+
+- negative 1,750개 (250개 적음). positive·설정은 그대로
+- 채점: 우리 test 의 범주별 negative 50개. 문턱값은 같은 test positive 90% 기준 (negative 를 안 씀). 스크립트 `src/negcat_report.py`
+- 노트북 `notebooks/11_exp_X_mapping.ipynb`. seed 0 한 번
+- 범주를 고른 근거 (기존 결과, 4.1절 이후 봄): 전체 학습 ours 는 우리 test 의 모든 범주를 49~50/50 greedy 거절. A00(negative 0개)도 문턱값으로 knowledge·math·smalltalk·advice·writing 49~50/50, phone_settings 43, smart_home 45.
+  → 먼 범주는 매핑이 없어도 거절되므로 writing 은 "차이가 없어야 하는" 대조군, smart_home 이 시험대
+
+**예측** (돌리기 전에 적어 둠)
+- X_token_writing: 뺀 writing 을 greedy 로 여전히 대부분 거절 (≥ 40/50). 먼 범주는 다른 먼 범주(knowledge·smalltalk)의 매핑으로 덮인다
+- X_token_smart_home: 뺀 smart_home 의 greedy 거절이 크게 떨어진다 (49 → 25 이하). 가장 비슷한 지원 함수(Nest 온도, 문 잠금, Nest Hub)를 부른다. **이게 나오면 매핑 가설을 뒷받침**
+- X_oe_smart_home: 뺀 smart_home 의 문턱값 거절이 X_token_smart_home 의 문턱값 거절(`<nexa_20>` 확률 기준)보다 높다. 단 A00 수준(45/50) 을 넘을지는 모름
+- 뺀 범주 말고 다른 범주와 positive 정확도는 거의 그대로
+- 반대로 X_token_smart_home 이 smart_home 을 40/50 이상 거절하면 → 매핑보다 "20개 함수의 여집합" 쪽. 그대로 보고한다
+
 ## 5. 실험 B: 내용 (Q2)
 
 negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의 절반(1,000개)의 내용뿐**이다.
@@ -244,3 +271,5 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-22 | 실험 A00 추가 (4.1절): negative 0% + MSP 거절. 예측을 돌리기 전에 기록 | 연구 방향 논의 중 나온 아이디어. MASSIVE 결과를 본 뒤의 추가라서, MASSIVE·BFCL 채점은 7절 5단계까지 미룬다 |
 | 2026-11-22 | **A00 결과를 본 뒤** MSP 점수 규칙 수정: 함수 토큰을 안 고른 출력은 0 대신 그 단계 상위 5개의 함수 토큰 확률로 계산 (`src/refusal_metrics.py`) | A00 이 negative 24개에서 함수 이름을 지어냈는데 0 이면 "가장 확신한 호출" 로 세져 점수의 뜻과 반대. irr 점수 규칙은 그대로. 수정 전 dev AUROC 0.931, 수정 후 0.991. 노트북 09 출력은 수정 전 숫자 |
 | 2026-11-22 | 실험 OE 추가 (4.2절): negative 를 Outlier Exposure loss 로 학습 + MSP 거절. 예측을 돌리기 전에 기록 | 매핑 가설(거절을 학습 negative 종류의 매핑으로 외운다)에서 나온 처방. A00 결과를 본 뒤의 추가 |
+| 2026-11-22 | 실험 X 추가 (4.3절): negative 범주 하나(writing / smart_home) 빼고 token·OE 학습. 범주 라벨 `data/neg_categories.json`, 채점 `src/negcat_report.py`. 예측을 돌리기 전에 기록 | 매핑 가설 직접 검증. 뺄 범주는 기존 ours·A00 의 범주별 결과를 보고 고름 (먼 범주 대조군 + near-miss 시험대) |
+| 2026-11-22 | `OETrainer` 수정: `--grad-accum` 을 쓸 때 loss 를 누적 횟수로 나누게 (`model_accepts_loss_kwargs = False`). 노트북 10·11 은 A100 80GB 가 아니면 멈춤 | 고치기 전엔 누적 시 OE 모델의 실제 lr 이 누적 횟수배. 노트북 10 첫 실행은 40GB 런타임에서 OOM 으로 학습 전에 멈춰 결과에 영향 없음. 학습은 계속 batch 16 한 번에 (ours 와 같은 조건) |

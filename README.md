@@ -19,7 +19,7 @@
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) + 공식 평가셋 교차 평가 (`src/official_bench.py`) | Colab + 랩탑 | ✅ |
-| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 실행 전) | Colab | 🔄 |
+| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 실행 전), 실험 X negative 범주 하나 빼고 학습 = 매핑 가설 (`notebooks/11_exp_X_mapping.ipynb`, 실행 전) | Colab | 🔄 |
 
 ## 0단계에서 확인한 것 (공개 모델)
 - 구조는 `GemmaForCausalLM`, vocab 256,022 = Gemma 256,000 + 특수 토큰 22개 (`<nexa_0>`~`<nexa_20>` = ID 256000~256020, `<nexa_end>` = 256021)
@@ -303,6 +303,14 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
 - **바꾸는 것**: ours 는 negative 정답이 `<nexa_20>` (거절을 21번째 함수처럼 외움). OE 는 negative 에서 함수 토큰 20개 확률이 고를수록 loss 가 작다 (Outlier Exposure, Hendrycks 외 2019). 거절은 A00 처럼 MSP 문턱값
 - **왜**: 거절을 "학습 negative 종류 → `<nexa_20>`" 매핑으로 외운다는 가설 (추정). 외울 거절 클래스를 없애면 함수 쪽 경계를 배우는지 본다
 - **설계·예측**: EXPERIMENT_DESIGN.md 4.2절 (돌리기 전에 기록)
+- **런타임**: A100 **80GB** 필요 (노트북 10·11 은 40GB 면 준비 셀에서 멈춘다). 40GB 는 fp32 가중치·기울기·AdamW 상태만 약 40GB 라 batch 를 줄여도 안 들어가고, 8-bit Adam 등으로 바꾸면 ours·A00 과 조건이 달라진다. 첫 시도는 40GB 런타임이 배정돼 OOM (2026-11-22)
+- **결과**: 아직 없음
+
+## 실험 X: negative 범주 하나 빼고 학습 — 매핑 가설 (논문에 없는 추가, `notebooks/11_exp_X_mapping.ipynb`)
+- **노트북 역할**: negative 8개 범주 중 writing(먼 범주) 또는 smart_home(near-miss)을 학습에서 빼고 `<nexa_20>` 방식·OE 방식으로 각각 학습 (모델 4개). 우리 test 의 범주별 negative 50개를 몇 개 거절하는지 `src/negcat_report.py` 로 표를 만든다
+- **묻는 것**: `<nexa_20>` 모델이 거절을 "학습한 종류 → `<nexa_20>`" 으로 외웠다면 뺀 범주를 거절하지 못한다. OE 는 덜 떨어져야 한다
+- **범주 라벨**: `data/neg_categories.json` (`python -m src.neg_categories build`, 생성 기록에서 만듦)
+- **설계·예측**: EXPERIMENT_DESIGN.md 4.3절 (돌리기 전에 기록)
 - **결과**: 아직 없음
 ## 이후 연구 (2부, 별도 저장소)
 2026-11-19 부터 함수 목록을 바꾼 통제 실험은 `../tool_calling_project` 에서 한다 (코드는 이 저장소 커밋 `8a00257` 에서 복사).

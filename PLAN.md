@@ -64,7 +64,10 @@
   - [x] 코드: `src/train.py --neg-loss oe`, `masking.build_example(oe=True)`. 랩탑 `--tiny` 로 확인
   - [ ] Colab 학습 + 우리 test·공식 210 채점
   - [ ] 결과를 4.2절 예측과 비교해 README 에 정리
-  - [ ] 매핑 가설 검증: negative 범주 하나 빼고 학습 (ours 방식 vs OE), 빠진 범주를 거절하는지
+- [ ] (논문에 없는 추가) 실험 X: negative 범주 하나 빼고 학습 = 매핑 가설 확인 (`notebooks/11_exp_X_mapping.ipynb`, 설계·예측은 `EXPERIMENT_DESIGN.md` 4.3절)
+  - [x] 코드: `src/neg_categories.py` (범주 라벨), `src/train.py --exclude-neg-category`, `src/negcat_report.py` (범주별 표)
+  - [ ] Colab: writing·smart_home × token·oe 학습 4번 + 우리 test 채점 (노트북 10 먼저)
+  - [ ] 결과를 4.3절 예측과 비교해 README 에 정리
 - [ ] 학습 타깃에 `Function description` 을 붙이는 것 vs 안 붙이는 것 (논문은 붙이지만 효과를 따로 실험하지 않음)
 - [ ] negative 비율 (논문 1:1 vs 더 적게)
 - 5단계 오답에서 나온 후보 (논문에 없는 추가)
