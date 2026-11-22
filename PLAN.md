@@ -62,8 +62,8 @@
   - [ ] seed 1·2 추가 (지금은 n=1)
 - [ ] (논문에 없는 추가) 실험 OE: negative 를 "어느 함수도 아님"(Outlier Exposure loss)으로 학습 + MSP 거절 (`notebooks/10_exp_OE.ipynb`, 설계·예측은 `EXPERIMENT_DESIGN.md` 4.2절)
   - [x] 코드: `src/train.py --neg-loss oe`, `masking.build_example(oe=True)`. 랩탑 `--tiny` 로 확인
-  - [ ] Colab 학습 + 우리 test·공식 210 채점
-  - [ ] 결과를 4.2절 예측과 비교해 README 에 정리
+  - [x] Colab 학습 + 우리 test·공식 210 채점 (학습 447초, A100 80GB)
+  - [x] 결과를 4.2절 예측과 비교해 README 에 정리
 - [ ] (논문에 없는 추가) 실험 X: negative 범주 하나 빼고 학습 = 매핑 가설 확인 (`notebooks/11_exp_X_mapping.ipynb`, 설계·예측은 `EXPERIMENT_DESIGN.md` 4.3절)
   - [x] 코드: `src/neg_categories.py` (범주 라벨), `src/train.py --exclude-neg-category`, `src/negcat_report.py` (범주별 표)
   - [ ] Colab: writing·smart_home × token·oe 학습 4번 + 우리 test 채점 (노트북 10 먼저)

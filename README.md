@@ -19,7 +19,7 @@
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) + 공식 평가셋 교차 평가 (`src/official_bench.py`) | Colab + 랩탑 | ✅ |
-| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 실행 전), 실험 X negative 범주 하나 빼고 학습 = 매핑 가설 (`notebooks/11_exp_X_mapping.ipynb`, 실행 전) | Colab | 🔄 |
+| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 결과 있음), 실험 X negative 범주 하나 빼고 학습 = 매핑 가설 (`notebooks/11_exp_X_mapping.ipynb`, 실행 전) | Colab | 🔄 |
 
 ## 0단계에서 확인한 것 (공개 모델)
 - 구조는 `GemmaForCausalLM`, vocab 256,022 = Gemma 256,000 + 특수 토큰 22개 (`<nexa_0>`~`<nexa_20>` = ID 256000~256020, `<nexa_end>` = 256021)
@@ -304,7 +304,19 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
 - **왜**: 거절을 "학습 negative 종류 → `<nexa_20>`" 매핑으로 외운다는 가설 (추정). 외울 거절 클래스를 없애면 함수 쪽 경계를 배우는지 본다
 - **설계·예측**: EXPERIMENT_DESIGN.md 4.2절 (돌리기 전에 기록)
 - **런타임**: A100 **80GB** 필요 (노트북 10·11 은 40GB 면 준비 셀에서 멈춘다). 40GB 는 fp32 가중치·기울기·AdamW 상태만 약 40GB 라 batch 를 줄여도 안 들어가고, 8-bit Adam 등으로 바꾸면 ours·A00 과 조건이 달라진다. 첫 시도는 40GB 런타임이 배정돼 OOM (2026-11-22)
-- **결과**: 아직 없음
+- **결과** (seed 0 한 번, 학습 447초. 자세히는 EXPERIMENT_DESIGN.md 4.2절)
+
+  | 모델 | dev AUROC | dev greedy pos / neg | dev 문턱값 적용 | 공식 AUROC | 공식 greedy pos | 공식 positive 거절 (dev 문턱값) |
+  |---|---|---|---|---|---|---|
+  | OE (MSP) | 1.000 | 89.0% / 0% | 90.1% | 0.993 | 74.0% | 62 / 200 |
+  | A00 (MSP) | 0.991 | 89.8% / 0% | 88.5% | 0.998 | 75.5% | 42 / 200 |
+  | ours (`<nexa_20>`) | 1.000 | 88.8% / 99.8% | 90.1% | 0.994 | 67.5% | 65 / 200 |
+
+  - 같은 생성기 test(dev)에서는 OE 가 ours 와 똑같이 완벽히 가른다. A00 이 놓친 near-miss(폰 설정·스마트홈) 12개도 거절
+  - 공식 210 에서 거절한 positive 수는 ours 와 거의 같다 (62 vs 65, 차이 유의하지 않음). 과잉 거절은 줄지 않았다
+  - 그런데 **누구를** 거절했는지는 다르다. OE 가 거절한 62개 중 38개는 A00 도 거절한 것 (기계식 날짜 캘린더 요청 등 낯선 표기). ours 와 겹치는 건 32개. 거절 기준이 "아는 함수와 닮았나"인 모델(OE·A00)과 `<nexa_20>` 모델(ours)이 서로 다른 positive 를 놓친다 (해석은 추정)
+  - ours 만 거절한 positive 31개는 train negative 를 조금 더 닮았다 (p = 0.014). 문 잠금·밝기·방해 금지에 몰려 있고, 가장 닮은 negative 가 차고 문·손전등·비행기 모드 같은 형제 near-miss. 매핑과 맞는 **약한** 증거. 다만 강한 거절(greedy `<nexa_20>`)은 negative 를 닮아서가 아니라 낯선 말투 때문 (`src/neg_similarity.py`, 설계 문서 4.2절)
+  - 문항별 결과 랩탑 복사본: `data/raw/eval/OE/`, `data/raw/eval_official/OE/`, 학습 기록 `data/raw/runs_OE/log_history.json`
 
 ## 실험 X: negative 범주 하나 빼고 학습 — 매핑 가설 (논문에 없는 추가, `notebooks/11_exp_X_mapping.ipynb`)
 - **노트북 역할**: negative 8개 범주 중 writing(먼 범주) 또는 smart_home(near-miss)을 학습에서 빼고 `<nexa_20>` 방식·OE 방식으로 각각 학습 (모델 4개). 우리 test 의 범주별 negative 50개를 몇 개 거절하는지 `src/negcat_report.py` 로 표를 만든다
