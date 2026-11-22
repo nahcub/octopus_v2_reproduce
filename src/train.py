@@ -15,6 +15,9 @@
     # Colab A100: 짧게 시험 학습 → 본 학습
     python -m src.train --max-steps 30 --output-dir /content/runs/try
     python -m src.train --output-dir /content/drive/MyDrive/octopus_v2/runs/full
+
+    # 실험 A00 (논문에 없는 추가): negative 없이 positive 만. 거절은 refusal_metrics 의 msp 점수로 본다
+    python -m src.train --only-kind positive --output-dir /content/drive/MyDrive/octopus_v2/runs/A00
 """
 
 from __future__ import annotations
@@ -70,6 +73,8 @@ def main() -> None:
     p.add_argument("--tiny", action="store_true", help="랩탑 디버깅: 작은 무작위 Gemma (토크나이저는 --model 것)")
     p.add_argument("--train-file", default="data/train.jsonl")
     p.add_argument("--limit", type=int, default=None, help="앞에서 N개만 사용 (디버깅)")
+    p.add_argument("--only-kind", choices=["positive", "negative"], default=None,
+                   help="(논문에 없는 추가) 이 kind 만 학습. 실험 A00: --only-kind positive (negative 0%%)")
     p.add_argument("--output-dir", default="runs/full")
     p.add_argument("--epochs", type=float, default=3)
     p.add_argument("--lr", type=float, default=5e-5)
@@ -99,7 +104,10 @@ def main() -> None:
     model.to(device)
 
     # 2) 데이터: 3단계 함수로 채점표까지 만든다
-    rows = load_jsonl(Path(args.train_file))[: args.limit]
+    rows = load_jsonl(Path(args.train_file))
+    if args.only_kind:
+        rows = [r for r in rows if r["kind"] == args.only_kind]
+    rows = rows[: args.limit]
     examples = [build_example(r, tokenizer) for r in rows]
     print(f"[데이터] {len(examples)}개, 최대 {max(len(e['input_ids']) for e in examples)} 토큰")
 

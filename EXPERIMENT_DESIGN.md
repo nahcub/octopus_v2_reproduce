@@ -86,6 +86,25 @@ step 수를 맞추면 이번에는 positive 를 보는 횟수가 달라지므로
 - 이렇게 나오면 → "비율은 기준선만 옮긴다" 를 주장할 수 있다
 - AUROC 도 크게 달라지면 → 비율이 경계 자체에도 영향을 준다. 그대로 보고한다
 
+### 4.1 A00: negative 0% + softmax 문턱값 (2026-11-22 추가, 논문에 없는 추가)
+
+| 모델 | positive | negative | 거절 방법 |
+|---|---|---|---|
+| A00 | 2,000 (현재 train positive 전부) | 0 | `<nexa_20>` 대신 **MSP**: 1 − (함수 토큰 20개 중 최대 확률) 이 문턱값 이상이면 거절 |
+
+- 묻는 것: 거절 클래스(`<nexa_20>`)를 negative 로 학습하는 게 경계에 도움이 되나, 아니면 negative 의 말투가 경계를 오염시키나
+- MSP 는 OOD 탐지의 기본 기준선 (Hendrycks & Gimpel, ICLR 2017). 새 방법이 아니라 통제 비교용
+- 학습 설정은 A50 과 같다 (3 epoch). 문장 수가 절반이라 step 도 절반 (375). A05·A20 과 같은 성격의 차이
+- 코드: `src/train.py --only-kind positive`, 채점 `src/softmax_score.py`, `src/refusal_metrics.py` 의 `:msp`
+- 노트북: `notebooks/09_exp_A00.ipynb`. 채점은 우선 **우리 test(dev) 와 공식 210** 만. MASSIVE·BFCL 은 7절 5단계 규칙대로 나중에
+- 같은 MSP 점수를 기존 ours·공개 모델에도 계산해서 `<nexa_20>` 점수와 나란히 본다 (추가 학습 없음)
+
+**예측** (돌리기 전에 적어 둠)
+- greedy 기본 생성의 negative 정확도는 0% (`<nexa_20>` 을 배운 적이 없음). positive 정확도는 A50 과 비슷하거나 조금 높다
+- dev AUROC(MSP)는 A50 의 `<nexa_20>` AUROC 보다 낮다: 같은 생성기 negative 는 말투로 거의 완벽히 가를 수 있는데 A00 은 그걸 못 배움
+- negative 중 잡담·상식은 MSP 로 잘 걸러지고, 함수와 비슷한 near-miss 는 높은 확률로 호출한다 (신경망은 비슷한 입력에 확신하므로)
+- 공식 210 에서는 A50 대비 차이가 dev 보다 작다 (dev 의 이점이 말투 학습에서 왔다면)
+
 ## 5. 실험 B: 내용 (Q2)
 
 negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의 절반(1,000개)의 내용뿐**이다.
@@ -176,3 +195,4 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-18 | MASSIVE 후보를 "관련 의도만" → "test 파티션 전체" 로 바꿈 (3.1) | 의도 라벨에 잡음이 있어 다른 의도 속 positive 를 놓치고, 잡담·계산 negative 가 빠지기 때문. 모델 결과를 보기 전 결정 |
 | 2026-11-18 | MASSIVE test 확정 (465개), 지표 스크립트 `src/refusal_metrics.py`, Colab 노트북 08 추가 | 3.1 실행. 라벨 규칙은 MASSIVE_TEST.md 2절, 모델 결과를 보기 전에 정함 |
 | 2026-11-18 | **기준 모델(ours = A50·B0, 공개 모델)의 MASSIVE 결과를 봤다** (MASSIVE_TEST.md 결과 절) | 7절 5단계보다 먼저 채점함. 이후 실험 A·B 의 데이터·설정을 이 결과로 바꾸지 않는다. dev 문턱값이 MASSIVE 로 옮겨지지 않는 문제가 보였지만 6절 주 지표는 아직 바꾸지 않음 |
+| 2026-11-22 | 실험 A00 추가 (4.1절): negative 0% + MSP 거절. 예측을 돌리기 전에 기록 | 연구 방향 논의 중 나온 아이디어. MASSIVE 결과를 본 뒤의 추가라서, MASSIVE·BFCL 채점은 7절 5단계까지 미룬다 |

@@ -14,6 +14,8 @@
         --model ours  .../eval_massive/ours/probs.jsonl  .../eval/ours/probs.jsonl \
         --model public .../eval_massive/public/probs.jsonl .../eval/public/probs.jsonl
     --model 다음은 이름, test probs, dev probs (dev 는 data/test.jsonl 로 만든 probs. 없으면 - 로 두고 AUROC 만 본다)
+    이름 끝에 :msp 를 붙이면 그 모델은 p_irrelevant 대신 MSP 점수를 쓴다 (예: --model A00:msp ...). 기본은 :irr
+    (논문에 없는 추가: msp 점수, 실험 A00 용)
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import sys
 from pathlib import Path
 
 DEV_TEST = Path("data/test.jsonl")
+NEG_ID = 20  # <nexa_20> = irrelevant_function (src/evaluate.py 와 같은 값)
 RECALL = 0.90
 N_BOOT = 1000
 SEED = 0
@@ -34,10 +37,32 @@ def load_jsonl(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.open(encoding="utf-8") if l.strip()]
 
 
-def p_irr(probs: list[dict], n: int) -> list[float]:
+SCORES = ("irr", "msp")
+
+
+def refusal_scores(probs: list[dict], n: int, score: str = "irr") -> list[float]:
+    """문항마다 거절 점수 (높을수록 거절 쪽).
+    irr: <nexa_20> 확률 (p_irrelevant)
+    msp: 1 - (함수 토큰 <nexa_0>~<nexa_19> 중 가장 높은 확률). Maximum Softmax Probability (Hendrycks & Gimpel 2017).
+         <nexa_20> 을 쓰지 않으므로 negative 없이 학습한 모델(실험 A00)에도 쓸 수 있다. 확률은 전체 사전 기준 (다시 정규화하지 않음)
+    두 점수 모두 함수 토큰을 한 번도 고르지 않은 출력(func 가 null)은 0 (거절 안 함) 으로 둔다
+    """
     assert len(probs) == n, f"probs {len(probs)} != test {n} (생성이 끝나지 않았거나 다른 test 파일)"
     by_idx = {p["index"]: p for p in probs}
-    return [((by_idx[i].get("func") or {}).get("p_irrelevant") or 0.0) for i in range(n)]
+    out = []
+    for i in range(n):
+        f = by_idx[i].get("func")
+        if not f:
+            out.append(0.0)
+        elif score == "irr":
+            out.append(f.get("p_irrelevant") or 0.0)
+        else:
+            out.append(1.0 - max(f["dist"][:NEG_ID]))
+    return out
+
+
+def p_irr(probs: list[dict], n: int) -> list[float]:
+    return refusal_scores(probs, n, "irr")
 
 
 def auroc(pos: list[float], neg: list[float]) -> float:
@@ -70,9 +95,10 @@ def metrics(rows: list[dict], scores: list[float], idx: list[int], t: float | No
     if t is not None:
         m["refuse@r"] = sum(v >= t for v in neg) / len(neg)
         m["pos_recall"] = sum(v < t for v in pos) / len(pos)
-        types = sorted({rows[i]["neg_type"] for i in idx if rows[i]["kind"] == "negative"})
+        # 우리 test·공식 210 에는 neg_type 칸이 없다 → 유형별은 건너뜀
+        types = sorted({rows[i].get("neg_type") for i in idx if rows[i]["kind"] == "negative"} - {None})
         for ty in types:
-            vs = [scores[i] for i in idx if rows[i]["neg_type"] == ty]
+            vs = [scores[i] for i in idx if rows[i].get("neg_type") == ty]
             m[f"refuse:{ty}"] = sum(v >= t for v in vs) / len(vs)
     return m
 
@@ -91,10 +117,12 @@ def main() -> None:
     dev_rows = load_jsonl(a.dev_test) if a.dev_test.exists() else None
     models = []
     for name, tp, dp in a.model:
-        s = p_irr(load_jsonl(Path(tp)), len(rows))
+        score = name.rsplit(":", 1)[1] if ":" in name else "irr"
+        assert score in SCORES, f"{name}: 점수 종류는 {SCORES} 중 하나 (이름 끝에 :msp 처럼)"
+        s = refusal_scores(load_jsonl(Path(tp)), len(rows), score)
         t = None
         if dp != "-":
-            ds = p_irr(load_jsonl(Path(dp)), len(dev_rows))
+            ds = refusal_scores(load_jsonl(Path(dp)), len(dev_rows), score)
             t = threshold_at_recall([v for v, r in zip(ds, dev_rows) if r["kind"] == "positive"], a.recall)
         models.append((name, s, t))
 
