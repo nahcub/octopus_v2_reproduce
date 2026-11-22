@@ -19,7 +19,7 @@
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) + 공식 평가셋 교차 평가 (`src/official_bench.py`) | Colab + 랩탑 | ✅ |
-| 6 | Ablation | Colab | ⬜ |
+| 6 | Ablation. 첫 번째: 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`) | Colab | ⬜ |
 
 ## 0단계에서 확인한 것 (공개 모델)
 - 구조는 `GemmaForCausalLM`, vocab 256,022 = Gemma 256,000 + 특수 토큰 22개 (`<nexa_0>`~`<nexa_20>` = ID 256000~256020, `<nexa_end>` = 256021)
@@ -266,6 +266,22 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
 **남은 것**
 - 사람 채점: 두 모델의 `errors.csv` 를 같은 기준으로 본다. 기준은 결과를 보기 전에 먼저 적는다
 - 공식 test 를 보고 train 을 고치면 공식 test 는 더 이상 공정한 시험이 아니다. 고친다면 제3의 test (다른 회사 LLM 이 논문·모델 카드만 보고 만든 것) 로 확인한다
+
+## 실험 A00: negative 없이 학습 + softmax 로 거절 (논문에 없는 추가, `notebooks/09_exp_A00.ipynb`)
+설계와 돌리기 전 예측은 [EXPERIMENT_DESIGN.md](EXPERIMENT_DESIGN.md) 4.1절.
+
+- **묻는 것**: `<nexa_20>`(irrelevant_function)을 negative 로 학습하는 게 거절에 도움이 되나, 아니면 negative 의 말투가 경계를 오염시키나
+- **학습**: `data/train.jsonl` 의 positive 2,000개만 (`python -m src.train --only-kind positive`). 나머지 설정은 4단계와 같다 (3 epoch → 375 step)
+- **거절 방법**: `<nexa_20>` 을 배운 적이 없으므로, 함수 토큰 단계에서 **MSP = 1 − (함수 20개 중 최대 확률)** 이 문턱값 이상이면 거절로 본다
+  (Maximum Softmax Probability, Hendrycks & Gimpel 2017. OOD 탐지의 기본 기준선)
+- **채점** (`src/softmax_score.py`): 우리 test(800)와 공식 210 에서
+  - greedy 출력의 정답 유무 (`src.evaluate score`, 기존과 같음)
+  - 문턱값 적용 정답: dev(우리 test) positive 의 90% 가 거절되지 않는 문턱값을 dev 에서 정하고, 점수가 그 이상이면 거절로 바꿔 다시 채점
+  - softmax 확률: 결과 종류별 확률 중앙값, 점수 구간별 positive/negative 분포, 가장 확신한 오답
+  - 같은 채점을 기존 ours·공개 모델에도 한다 (`<nexa_20>` 확률과 MSP 둘 다). 차이의 95% 구간은 `src/refusal_metrics.py` (`--model 이름:msp`)
+- **결과 위치**: Drive `runs/A00/` (모델), `runs/eval/<모델>/`, `runs/eval_official/<모델>/` 의 `softmax_<점수>_scored.jsonl`(문항별), `softmax_<점수>_summary.json`
+- MASSIVE·BFCL 은 설계 문서 7절 규칙대로 모든 실험 모델이 정해진 뒤 채점한다
+- **결과**: (돌린 뒤 채움)
 
 ## 이후 연구 (2부, 별도 저장소)
 2026-11-19 부터 함수 목록을 바꾼 통제 실험은 `../tool_calling_project` 에서 한다 (코드는 이 저장소 커밋 `8a00257` 에서 복사).

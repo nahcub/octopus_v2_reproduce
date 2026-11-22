@@ -55,6 +55,10 @@
 - [ ] functional token 방식 vs 함수 이름을 텍스트로 생성하는 방식
 - [ ] 임베딩 초기화 방식 비교
 - [ ] LoRA vs full fine-tuning (가능하면)
+- [ ] (논문에 없는 추가) 실험 A00: negative 없이 학습 + softmax 최대값(MSP)으로 거절 (`notebooks/09_exp_A00.ipynb`, 설계·예측은 `EXPERIMENT_DESIGN.md` 4.1절)
+  - [x] 코드: `src/train.py --only-kind positive`, `src/softmax_score.py`, `src/refusal_metrics.py` 의 `:msp`
+  - [ ] Colab 학습 + 우리 test·공식 210 채점
+  - [ ] 결과를 4.1절 예측과 비교해 README 에 정리
 - [ ] 학습 타깃에 `Function description` 을 붙이는 것 vs 안 붙이는 것 (논문은 붙이지만 효과를 따로 실험하지 않음)
 - [ ] negative 비율 (논문 1:1 vs 더 적게)
 - 5단계 오답에서 나온 후보 (논문에 없는 추가)
