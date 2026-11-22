@@ -230,6 +230,54 @@ step 수를 맞추면 이번에는 positive 를 보는 횟수가 달라지므로
 - 다만 우리 test 는 학습과 같은 생성기라, 뺀 범주라도 positive 와 말투가 다르다 (A00 도 smart_home 45/50 거절). 즉 이 결과는 "범주 매핑이 아니다" 까지만 말하고,
   공식 test 에서 ours 가 과잉 거절한 원인(낯선 말투, 4.2절 유사도 분석)과 함께 보면 **모델이 배운 거절 경계는 "학습 positive 의 분포 밖" 에 가깝다** 는 쪽이 더 맞아 보인다. 이것도 추정이며 seed 1번, 범주 2개만 봄
 
+### 4.4 실험 S: 말투를 바꿔 쓴 데이터 — 거절이 말투에 기대는가 (2026-11-22 추가, 논문에 없는 추가)
+
+- **배경**: 실험 X(4.3절)에서 negative 범주를 통째로 빼도 거의 다 거절했다. 공식 test 에서는 낯선 말투의 positive 를 거절했고(4.2절 유사도 분석), 공개 모델은 우리 negative 를 39% 만 거절했다.
+  → 두 해석이 남는다 (둘 다 추정)
+  - **일반화 가설**: 모델은 "20개 함수가 아닌 것" 을 배웠고, 학습 말투가 좁아서 처음 보는 말투에서만 흔들린다. 말투를 넓혀 학습하면 **처음 보는 말투에도** 나아진다
+  - **말투 암기 가설** (사용자 예측): 모델은 의미보다 말투 규칙성을 힌트로 쓴다. 말투를 넓혀도 **학습에 넣은 말투에서만** 나아지고, 처음 보는 말투에서는 그대로 실패한다
+- **방법**: 같은 문장을 내용(함수·인자)은 그대로 두고 말투만 바꿔 다시 쓴다 (Gemini). positive 와 negative 를 **같은 말투들로** 바꾸므로 말투만으로는 positive/negative 를 가를 수 없다
+- **말투 축 5개** (기존 생성 조건 `prompts.STYLES` 6개 — 짧은 명령·공손한 문장·구어·맥락 포함·Can you 질문·소문자 타이핑 — 에 없는 것으로 고름)
+
+| 이름 | 말투 | 예 ("Call Mom at 6 PM") |
+|---|---|---|
+| howto | 방법·정보를 묻는 형태 | How do I get my phone to ring Mom at 6? |
+| fragment | 동사 없는 명사구·메모 | Mom, call, 6 PM |
+| need | 필요·상황만 말하고 시키지 않음 | I really need to talk to my mom around six. |
+| form | 키-값·양식, 기계식 값 표기 | action=call; who=Mom; time=18:00 |
+| nonnative | 비원어민 영어 (문법·어순 어색) | Please you make call to mother at 6 PM time. |
+
+  - howto·fragment·form 은 공식 test 오답(4.2절, README 오답 표)을 보고 떠올린 말투다 → **공식 test 는 이 실험에서 참고로만** 쓰고, 최종 판정은 말투를 정할 때 보지 않은 MASSIVE·BFCL 로 한다 (모든 모델이 확정된 뒤 한 번, 8절 규칙)
+- **재작성 데이터**: train 4,000개 × 5 말투, 우리 test 에서 positive 200(함수당 10)·negative 200(범주당 25)를 seed 0 으로 뽑아 × 5 말투. 원래 말투를 orig 라 부른다
+- **검증**: positive 는 바꿔 쓴 문장 + 원래 인자로 "이 호출이 요청을 정확히 수행하나" 를 Gemini 로 확인 (기존 ③ 검증에서 "자연스러운가" 조건만 뺌 — fragment·form 은 일부러 부자연스럽다). negative 는 기존 negative 검증 그대로 (20개 함수 중 처리할 수 있는 게 없어야 통과). 떨어진 문장은 그 말투에서 빠진다
+- **학습 조건** (모두 4,000개, 같은 원문 4,000개를 쓰고 문장마다 말투 하나를 seed 0 으로 배정. positive·negative 가 같은 비율로 말투를 나눠 가짐. 그 말투 버전이 검증에서 떨어졌으면 orig)
+
+| 모델 | 학습 말투 |
+|---|---|
+| ours (기존) | orig 만 |
+| S_all | orig + 5개 전부 (6개 균등) |
+| S_minus_howto | orig + howto 뺀 4개 (5개 균등) |
+| S_minus_fragment | orig + fragment 뺀 4개 |
+
+  - 뺄 말투는 돌리기 전에 정함: ours 가 가장 크게 실패할 것으로 예상하는 둘 (howto 는 우리 negative 에 질문이 많아서, fragment 는 공식 test 의 동사 없는 요청 오답에서)
+  - 나머지 설정은 ours 와 같음 (`<nexa_20>` 방식, seed 0)
+- **채점**: 우리 test 400개 × 6 말투(orig + 5). 말투마다 positive greedy 거절률, positive 정확도, negative greedy 거절률, AUROC (irr 점수)
+- **판정 규칙** (뺀 말투 k 에서, positive greedy 거절률 기준):
+  메운 비율 = (ours_k − S_minus_k) / (ours_k − S_all_k). **0.5 이상이면 일반화 가설, 0.5 미만이면 말투 암기 가설.** negative 거절률도 같은 식으로 계산해 같이 보고
+  (ours_k − S_all_k 가 5%p 미만이면 그 말투는 애초에 어렵지 않았던 것 → 판정 안 함)
+
+**예측** (돌리기 전에 적어 둠)
+- ours: orig 에서는 positive 거절 거의 0. howto 에서 positive greedy 거절 15% 이상, fragment 5% 이상. negative 거절은 대부분 말투에서 90% 이상이지만 fragment·form 중 하나 이상에서 90% 아래로
+- S_all: 모든 말투에서 positive 거절 3% 이하, negative 거절 95% 이상. orig 정확도는 ours 와 2%p 이내
+- S_minus_k (k 에서): Claude 예측은 일반화 (메운 비율 ≥ 0.5). 사용자 예측은 말투 암기 (< 0.5). **어느 쪽이든 그대로 보고**
+- 한계: 바꿔 쓴 말투도 전부 Gemini 가 쓴 것이라 생성기는 하나다. 그래서 MASSIVE(사람이 쓴 문장)로 확인하는 것이 2차 결과
+
+**데이터 생성 기록** (2026-11-23, 모델 결과 보기 전)
+- train 재작성 검증 통과: positive howto 98.8%·fragment 97.8%·need 99.1%·form 96.3%·nonnative 98.7%, negative 99.8% 이상. 떨어진 문장은 그 말투 대신 원문(orig)으로 들어가 orig 가 조금 많다 (S_all positive orig 367, 나머지 316~332)
+- dev: 400개 중 5개 말투 모두 통과한 **390개(positive 191, negative 199)** × 6 = 2,340개로 채점 (말투끼리 같은 원문 비교)
+- dev 문장 2,340개 중 41개가 train 문장과 같다 (대부분 orig, 원래 test 의 seen_in_train 과 같은 성격). 빼지 않음
+- 소규모 실행에서 고친 것: form 말투가 `action: take_photo` 처럼 함수 이름을 쓰는 지름길 → 함수 이름·snake_case 금지. howto 의 질문형 negative 는 원문이 이미 그 말투라 그대로 둠
+
 ## 5. 실험 B: 내용 (Q2)
 
 negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의 절반(1,000개)의 내용뿐**이다.
@@ -333,3 +381,4 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-22 | `OETrainer` 수정: `--grad-accum` 을 쓸 때 loss 를 누적 횟수로 나누게 (`model_accepts_loss_kwargs = False`). 노트북 10·11 은 A100 80GB 가 아니면 멈춤 | 고치기 전엔 누적 시 OE 모델의 실제 lr 이 누적 횟수배. 노트북 10 첫 실행은 40GB 런타임에서 OOM 으로 학습 전에 멈춰 결과에 영향 없음. 학습은 계속 batch 16 한 번에 (ours 와 같은 조건) |
 | 2026-11-22 | OE 결과를 본 뒤 분석 추가: 공식 positive 의 거절 그룹별 train negative 유사도 (`src/neg_similarity.py`, 4.2절) | A50 만 거절한 positive 가 매핑으로 설명되는지 보려고. 사전에 계획한 분석이 아님 |
 | 2026-11-22 | 실험 X 결과 기록 (4.3절). smart_home 을 뺀 token 모델이 그 범주를 45/50 거절해 예측(25 이하)이 빗나감. 놓친 5개 문항 분석은 결과를 본 뒤 추가 | 미리 정한 기준대로 "여집합 쪽" 으로 보고 |
+| 2026-11-22 | 실험 S 추가 (4.4절): 같은 문장을 말투 5가지로 다시 써서 학습·채점. 예측과 판정 규칙을 돌리기 전에 기록 | 실험 X 결과를 본 뒤. 거절이 의미보다 말투에 기대는지 (사용자 예측) vs 말투를 넓히면 처음 보는 말투에도 일반화되는지 가르려고 |

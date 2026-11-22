@@ -19,7 +19,7 @@
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) + 공식 평가셋 교차 평가 (`src/official_bench.py`) | Colab + 랩탑 | ✅ |
-| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 결과 있음), 실험 X negative 범주 하나 빼고 학습 = 매핑 가설 (`notebooks/11_exp_X_mapping.ipynb`, 결과 있음) | Colab | 🔄 |
+| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 결과 있음), 실험 X negative 범주 하나 빼고 학습 = 매핑 가설 (`notebooks/11_exp_X_mapping.ipynb`, 결과 있음), 실험 S 같은 문장을 말투만 바꿔 학습 (`notebooks/12_exp_S_style.ipynb`, 실행 전) | Colab | 🔄 |
 
 ## 0단계에서 확인한 것 (공개 모델)
 - 구조는 `GemmaForCausalLM`, vocab 256,022 = Gemma 256,000 + 특수 토큰 22개 (`<nexa_0>`~`<nexa_20>` = ID 256000~256020, `<nexa_end>` = 256021)
@@ -334,6 +334,17 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
   - 놓친 5개는 지원 함수와 거의 같은 요청 (TV 볼륨 → `set_volume`, 초인종 카메라 → Nest Hub 영상·사진, 차고 문 → `open_or_lock_door`). OE 도 같은 TV 볼륨·차고 문을 놓침
   - 나머지 범주·positive 정확도(87.75~90.00%)는 그대로
   - 해석 (추정): 거절 경계는 "학습한 negative 종류" 보다 "학습 positive 분포 밖" 에 가깝다. 같은 생성기 test 라 뺀 범주도 말투가 positive 와 달라 쉽게 거절된다. 자세한 건 설계 문서 4.3절
+## 실험 S: 말투를 바꿔 쓴 데이터 — 거절이 말투에 기대는가 (논문에 없는 추가, `notebooks/12_exp_S_style.ipynb`)
+- **왜**: 실험 X 에서 negative 범주를 빼도 거의 다 거절했다. 그 거절이 "의미를 알아서" 인지 "말투가 달라서" 인지 우리 test(같은 생성기)로는 구분이 안 된다
+- **데이터**: `src/datagen/restyle.py` 가 같은 문장을 내용(함수·인자)은 그대로 두고 말투만 5가지(howto·fragment·need·form·nonnative)로 다시 쓰고 Gemini 로 검증한다.
+  positive·negative 를 같은 말투들로 바꾸므로 말투만으로는 둘을 가를 수 없다. 결과는 `data/style/` (Colab 에서 써야 해서 커밋. 중간 산출물 `data/raw/restyle_*` 는 git 제외)
+  - `train_S_all.jsonl`, `train_S_minus_howto.jsonl`, `train_S_minus_fragment.jsonl` (각 4,000개, 문장마다 말투 하나 배정)
+  - `dev_styled.jsonl` (우리 test 400개 × orig + 5 말투)
+- **노트북 역할**: 모델 3개 학습 + ours 포함 4개를 말투별 test 로 채점, `src/style_report.py` 로 말투별 positive·negative 거절률 표와 판정
+- **묻는 것**: 말투 하나를 빼고 넓게 학습한 모델이, 뺀 말투에서 ours(좁게 학습)와 S_all(그 말투도 학습) 중 어디에 가까운가. 가까운 쪽에 따라 일반화 가설 / 말투 암기 가설
+- **설계·예측·판정 규칙**: EXPERIMENT_DESIGN.md 4.4절 (돌리기 전에 기록)
+- **결과**: 아직 없음
+
 ## 이후 연구 (2부, 별도 저장소)
 2026-11-19 부터 함수 목록을 바꾼 통제 실험은 `../tool_calling_project` 에서 한다 (코드는 이 저장소 커밋 `8a00257` 에서 복사).
 연구 방향·관련 연구·평가 출처 조사 문서도 그쪽 `docs/` 로 옮겼다. 이 저장소는 1부(재현·진단)를 정리해 고정한다.
