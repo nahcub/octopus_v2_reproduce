@@ -29,12 +29,23 @@ from src.preprocess.tokens import add_functional_tokens
 IGNORE_INDEX = -100
 
 
-def build_example(row: dict, tokenizer) -> dict:
-    """jsonl 한 줄 → {"input_ids", "labels"}. 문제 부분(앞의 prompt_len 개)의 labels 를 -100 으로 덮는다."""
+def build_example(row: dict, tokenizer, oe: bool = False) -> dict:
+    """jsonl 한 줄 → {"input_ids", "labels"}. 문제 부분(앞의 prompt_len 개)의 labels 를 -100 으로 덮는다.
+
+    oe=True (논문에 없는 추가, 실험 OE): negative 는 <nexa_20> 을 정답으로 주지 않는다.
+    labels 를 전부 -100 으로 덮고, 함수 토큰이 나올 자리(func_pos)만 넘겨서 train.OETrainer 가
+    그 자리의 함수 토큰 20개 확률을 고르게 만드는 loss 를 따로 계산한다. positive 는 그대로.
+    """
     enc = encode(row, tokenizer)
     input_ids, n = enc["input_ids"], enc["prompt_len"]
     labels = [IGNORE_INDEX] * n + input_ids[n:]
-    return {"input_ids": input_ids, "labels": labels}
+    if not oe:
+        return {"input_ids": input_ids, "labels": labels}
+    func_pos = input_ids.index(tokenizer.convert_tokens_to_ids(f"<nexa_{row['token_id']}>"), n)
+    is_negative = row["kind"] == "negative"
+    if is_negative:
+        labels = [IGNORE_INDEX] * len(input_ids)
+    return {"input_ids": input_ids, "labels": labels, "func_pos": func_pos, "is_negative": is_negative}
 
 
 def collate(examples: list[dict], pad_token_id: int) -> dict[str, torch.Tensor]:
@@ -46,6 +57,9 @@ def collate(examples: list[dict], pad_token_id: int) -> dict[str, torch.Tensor]:
         batch["input_ids"].append(ex["input_ids"] + [pad_token_id] * pad)
         batch["labels"].append(ex["labels"] + [IGNORE_INDEX] * pad)
         batch["attention_mask"].append([1] * len(ex["input_ids"]) + [0] * pad)
+    for k in ("func_pos", "is_negative"):  # oe=True 로 만든 예시에만 있음
+        if k in examples[0]:
+            batch[k] = [ex[k] for ex in examples]
     return {k: torch.tensor(v) for k, v in batch.items()}
 
 

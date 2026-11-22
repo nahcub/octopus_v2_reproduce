@@ -18,6 +18,9 @@
 
     # 실험 A00 (논문에 없는 추가): negative 없이 positive 만. 거절은 refusal_metrics 의 msp 점수로 본다
     python -m src.train --only-kind positive --output-dir /content/drive/MyDrive/octopus_v2/runs/A00
+
+    # 실험 OE (논문에 없는 추가): negative 를 <nexa_20> 이 아니라 "함수 토큰 20개가 고르게" 로 학습 (Outlier Exposure)
+    python -m src.train --neg-loss oe --output-dir /content/drive/MyDrive/octopus_v2/runs/OE
 """
 
 from __future__ import annotations
@@ -47,11 +50,60 @@ def load_model(name: str, tiny: bool, vocab_size: int):
     return AutoModelForCausalLM.from_pretrained(name, dtype=torch.float32)
 
 
+def oe_loss(logits: torch.Tensor, func_pos: torch.Tensor, func_ids: list[int]) -> torch.Tensor:
+    """(논문에 없는 추가) Outlier Exposure loss (Hendrycks, Mazeika & Dietterich 2019).
+    negative 문장마다 함수 토큰이 나올 자리에서, 함수 토큰 20개만 놓고 다시 softmax 한 확률이
+    균등분포(각 1/20)와 얼마나 다른지 (cross-entropy). 20개가 고를수록 작고, 한 함수로 쏠릴수록 크다.
+    최솟값은 log 20 ≈ 3.00 (완전히 고를 때)."""
+    rows = torch.arange(len(func_pos), device=logits.device)
+    logit20 = logits[rows, func_pos - 1][:, func_ids].float()  # func_pos 의 토큰은 그 앞 자리(func_pos-1)가 예측한다
+    return -logit20.log_softmax(-1).mean(-1).mean()
+
+
+class OETrainer(Trainer):
+    """positive: 지금과 같은 다음 토큰 loss. negative: labels 가 모두 -100 이고 대신 oe_loss.
+    전체 loss = positive loss + oe_lambda × oe_loss."""
+
+    def __init__(self, *a, func_ids: list[int], oe_lambda: float, **kw):
+        super().__init__(*a, **kw)
+        self.func_ids, self.oe_lambda = func_ids, oe_lambda
+        self._parts = {"pos_loss": [], "oe_loss": []}
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kw):
+        func_pos, is_neg = inputs.pop("func_pos"), inputs.pop("is_negative")
+        out = model(**inputs)
+        if (inputs["labels"] != IGNORE_INDEX).any():
+            pos = out.loss
+        else:  # 묶음이 전부 negative 면 모델 loss 가 0/0 = nan 이라 0 으로 둔다
+            pos = out.logits.sum() * 0.0
+        loss = pos
+        if is_neg.any():
+            oe = oe_loss(out.logits[is_neg], func_pos[is_neg], self.func_ids)
+            loss = loss + self.oe_lambda * oe
+            self._parts["oe_loss"].append(oe.item())
+        self._parts["pos_loss"].append(pos.item())
+        return (loss, out) if return_outputs else loss
+
+    def log(self, logs, *a, **kw):
+        # 두 loss 를 따로 기록 (log_history.json 에 남는다)
+        for k, v in self._parts.items():
+            if v:
+                logs[k] = round(sum(v) / len(v), 4)
+                v.clear()
+        super().log(logs, *a, **kw)
+
+
 @torch.no_grad()
 def initial_check(model, tokenizer, examples: list[dict], device) -> None:
     """학습 전 한 묶음의 loss. 새 토큰은 아직 뜻이 없어서 <nexa_*> 자리의 loss 가 특히 높아야 정상."""
     model.eval()
     batch = {k: v.to(device) for k, v in collate(examples, tokenizer.pad_token_id).items()}
+    batch.pop("func_pos", None)
+    batch.pop("is_negative", None)
+    if not (batch["labels"] != IGNORE_INDEX).any():
+        print("[학습 전 loss] 점검 묶음이 전부 negative(oe) 라 건너뜀")
+        model.train()
+        return
     out = model(**batch)
     # 모델 안에서처럼 한 칸 밀어서 자리별 loss 를 직접 계산한다
     logits = out.logits[:, :-1].float()
@@ -75,6 +127,10 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None, help="앞에서 N개만 사용 (디버깅)")
     p.add_argument("--only-kind", choices=["positive", "negative"], default=None,
                    help="(논문에 없는 추가) 이 kind 만 학습. 실험 A00: --only-kind positive (negative 0%%)")
+    p.add_argument("--neg-loss", choices=["token", "oe"], default="token",
+                   help="negative 학습 방식. token: <nexa_20> 을 정답으로 (논문). "
+                        "oe: 함수 토큰 20개가 고르게 (논문에 없는 추가, Outlier Exposure). 거절은 refusal_metrics 의 msp 로 본다")
+    p.add_argument("--oe-lambda", type=float, default=0.5, help="oe loss 가중치 (Outlier Exposure 원 논문 값 0.5)")
     p.add_argument("--output-dir", default="runs/full")
     p.add_argument("--epochs", type=float, default=3)
     p.add_argument("--lr", type=float, default=5e-5)
@@ -108,8 +164,12 @@ def main() -> None:
     if args.only_kind:
         rows = [r for r in rows if r["kind"] == args.only_kind]
     rows = rows[: args.limit]
-    examples = [build_example(r, tokenizer) for r in rows]
-    print(f"[데이터] {len(examples)}개, 최대 {max(len(e['input_ids']) for e in examples)} 토큰")
+    oe = args.neg_loss == "oe"
+    examples = [build_example(r, tokenizer, oe=oe) for r in rows]
+    n_neg = sum(r["kind"] == "negative" for r in rows)
+    print(f"[데이터] {len(examples)}개 (negative {n_neg}), 최대 {max(len(e['input_ids']) for e in examples)} 토큰"
+          f" | negative 학습 방식: {args.neg_loss}" + (f" (λ={args.oe_lambda})" if oe else ""))
+    func_ids = tokenizer.convert_tokens_to_ids([f"<nexa_{i}>" for i in range(20)])  # irrelevant(<nexa_20>) 제외
 
     initial_check(model, tokenizer, examples[: min(8, len(examples))], device)
     if use_gpu:
@@ -138,12 +198,9 @@ def main() -> None:
         remove_unused_columns=False,  # 우리 collate 가 쓰는 칸을 Trainer 가 지우지 않게
         seed=args.seed,
     )
-    trainer = Trainer(
-        model=model,
-        args=targs,
-        train_dataset=examples,
-        data_collator=lambda batch: collate(batch, tokenizer.pad_token_id),
-    )
+    common = dict(model=model, args=targs, train_dataset=examples,
+                  data_collator=lambda batch: collate(batch, tokenizer.pad_token_id))
+    trainer = OETrainer(**common, func_ids=func_ids, oe_lambda=args.oe_lambda) if oe else Trainer(**common)
     trainer.train()
     if use_gpu:
         print(f"[GPU] 학습 중 최대 메모리 {torch.cuda.max_memory_allocated() / 2**30:.1f} GiB")

@@ -19,7 +19,7 @@
 | 3 | 전처리: 특수 토큰 추가, 프롬프트 포맷, loss masking (`src/preprocess/`) | 랩탑 | ✅ |
 | 4 | 학습 (Gemma-2B full fine-tuning, `src/train.py`) | Colab A100 80GB | ✅ |
 | 5 | 평가 (함수 선택/인자 정확도, latency, `src/evaluate.py`) + 공식 평가셋 교차 평가 (`src/official_bench.py`) | Colab + 랩탑 | ✅ |
-| 6 | Ablation. 첫 번째: 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음) | Colab | 🔄 |
+| 6 | Ablation. 실험 A00 negative 없이 학습 + softmax 거절 (`notebooks/09_exp_A00.ipynb`, 결과 있음), 실험 OE negative 를 "어느 함수도 아님"으로 학습 (`notebooks/10_exp_OE.ipynb`, 실행 전) | Colab | 🔄 |
 
 ## 0단계에서 확인한 것 (공개 모델)
 - 구조는 `GemmaForCausalLM`, vocab 256,022 = Gemma 256,000 + 특수 토큰 22개 (`<nexa_0>`~`<nexa_20>` = ID 256000~256020, `<nexa_end>` = 256021)
@@ -297,6 +297,13 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
   - A00 은 모르는 요청에 함수 이름을 지어낸다 (`botanical('...')`, dev negative 24개). 이 경우의 MSP 점수 규칙을 결과를 본 뒤 고쳤다 (EXPERIMENT_DESIGN.md 10절). 노트북 09 출력은 고치기 전 숫자 (dev AUROC 0.931)
   - 문항별 결과 랩탑 복사본: `data/raw/eval/A00/`, `data/raw/eval_official/{A00,ours,public}/` (`softmax_*_scored.jsonl`, `softmax_*.txt`)
 
+
+## 실험 OE: negative 를 "어느 함수도 아님"으로 학습 (논문에 없는 추가, `notebooks/10_exp_OE.ipynb`)
+- **노트북 역할**: ours 와 같은 train 4,000개로 학습하되 negative 의 loss 만 바꾼다 (`--neg-loss oe`). 학습 후 우리 test·공식 210 을 정답 + softmax 로 채점하고 ours·A00 과 나란히 본다
+- **바꾸는 것**: ours 는 negative 정답이 `<nexa_20>` (거절을 21번째 함수처럼 외움). OE 는 negative 에서 함수 토큰 20개 확률이 고를수록 loss 가 작다 (Outlier Exposure, Hendrycks 외 2019). 거절은 A00 처럼 MSP 문턱값
+- **왜**: 거절을 "학습 negative 종류 → `<nexa_20>`" 매핑으로 외운다는 가설 (추정). 외울 거절 클래스를 없애면 함수 쪽 경계를 배우는지 본다
+- **설계·예측**: EXPERIMENT_DESIGN.md 4.2절 (돌리기 전에 기록)
+- **결과**: 아직 없음
 ## 이후 연구 (2부, 별도 저장소)
 2026-11-19 부터 함수 목록을 바꾼 통제 실험은 `../tool_calling_project` 에서 한다 (코드는 이 저장소 커밋 `8a00257` 에서 복사).
 연구 방향·관련 연구·평가 출처 조사 문서도 그쪽 `docs/` 로 옮겼다. 이 저장소는 1부(재현·진단)를 정리해 고정한다.

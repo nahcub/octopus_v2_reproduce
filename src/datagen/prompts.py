@@ -16,6 +16,9 @@ STYLES = [
     "terse typing, may be lowercase with little punctuation",
 ]
 
+# (논문에 없는 추가, 실험 C 파일럿) 생성 분포를 흔들기 위한 시작 단어. 생성 뒤 generate.strip_opener 로 잘라낸다.
+OPENERS = ["Uhm", "Hmm", "You know", "So", "Well", "Okay so", "Oh", "Actually"]
+
 # 형식이 까다로운 함수에만 붙이는 질의 조건. 추론 시 모델은 오늘 날짜를 모르므로 날짜는 질의에 명시한다.
 QUERY_HINTS = {
     "make_phone_call": "Each request must contain the phone number to call, including the country code.",
@@ -90,12 +93,16 @@ def _summary(fn: dict) -> str:
 SUPPORTED_FUNCTIONS = [f for f in FUNCTIONS if f["name"] != "irrelevant_function"]
 
 
-def positive_queries(fn: dict, n: int, style: str, candidates: list[str] | None = None) -> str:
+def positive_queries(fn: dict, n: int, style: str, candidates: list[str] | None = None,
+                     opener: str | None = None) -> str:
     hint = QUERY_HINTS.get(fn["name"], "")
     extra = "".join(f"\n- {c}" for c in [hint, *(candidates or [])] if c)
     if candidates:
         extra += ("\n- Use a different value from the lists above in each request; "
                   "do not invent other names, numbers, or cities.")
+    if opener:
+        extra += (f'\n- Start every request with "{opener}," and continue naturally from it, '
+                  "the way a person who starts talking like that would go on.")
     return f"""You are creating training data for an on-device assistant that maps a user's request to an Android API call.
 
 API:

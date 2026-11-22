@@ -121,6 +121,30 @@ step 수를 맞추면 이번에는 positive 를 보는 횟수가 달라지므로
 - **결과를 본 뒤 바꾼 규칙**: 위 24개를 처음엔 MSP 점수 0(가장 확신한 호출)으로 셌다 (dev AUROC 0.931). 그 단계 상위 5개의 함수 토큰 확률로 세도록 `refusal_metrics.refusal_scores` 를 고쳤다 (0.991). 10절 변경 기록 참고
 - 결과 정리 아티팩트: https://claude.ai/artifact/514GReWrmTpqXKKBCxUQW5 (비공개)
 
+### 4.2 OE: negative 를 "어느 함수도 아님"으로 학습 (2026-11-22 추가, 논문에 없는 추가)
+
+| 모델 | positive | negative | negative 정답 | 거절 방법 |
+|---|---|---|---|---|
+| A50 = ours | 2,000 | 2,000 | `<nexa_20>` (21번째 함수처럼) | `<nexa_20>` 출력 또는 그 확률 |
+| A00 | 2,000 | 0 | 없음 | MSP 문턱값 |
+| **OE** | 2,000 | 2,000 (A50 과 같은 문장) | 없음. 함수 토큰 20개 확률이 **고를수록** loss 가 작다 | MSP 문턱값 |
+
+- 묻는 것 (매핑 가설): A50 은 거절을 "학습 negative 에 나온 종류의 요청 → `<nexa_20>`" 의 매핑으로 외운다 (추정).
+  거절을 클래스로 주지 않고 "어느 함수에도 확신하지 않음" 으로 가르치면, 외울 거절 클래스가 없어서 함수 쪽 경계를 배울까?
+- 방법은 Outlier Exposure (Hendrycks, Mazeika & Dietterich, ICLR 2019) 그대로. 함수 토큰 모델에 적용한 선행 연구는 아직 못 찾음 (추정, 확인 필요)
+- loss: positive 는 그대로, negative 는 함수 토큰 자리에서 20개만 놓고 softmax 한 확률과 균등분포의 cross-entropy. 전체 = positive + 0.5 × OE (원 논문 λ)
+- 바뀌는 건 negative loss 하나. 데이터·step 수(750)·나머지 설정은 A50 과 같다
+- 코드: `src/train.py --neg-loss oe` (`OETrainer`, `oe_loss`), `src/preprocess/masking.build_example(oe=True)`. 노트북 `notebooks/10_exp_OE.ipynb`
+- 채점: 우리 test(dev)·공식 210. MASSIVE·BFCL 은 7절 5단계 규칙대로 나중에
+
+**예측** (돌리기 전에 적어 둠)
+- greedy negative 정확도 ≈ 0% (`<nexa_20>` 을 배우지 않음). greedy positive 는 A50 과 비슷
+- dev AUROC(MSP): A00(0.991) 보다 높고 A50 `<nexa_20>`(1.000) 에 가깝다. 같은 생성기 negative 를 직접 봤기 때문
+- dev 문턱값 뒤 남는 실수는 A00 처럼 near-miss 에 몰리지만 수는 A00(13개) 보다 적다
+- 공식 210 에 dev 문턱값을 옮겨 쓰면 거절하는 positive 수는 A00(42) 과 A50(65) 사이. 거절 클래스를 외우지 않으니 낯선 말투 positive 를 negative 쪽으로 덜 끌어당긴다 (가장 불확실한 예측)
+- 문턱값 이식 문제는 남는다 (확률 하나로 거절하는 방식의 공통 한계)
+- 매핑 가설 자체의 검증은 이 실험이 아니라 범주 하나를 뺀 학습 (A50 vs OE, 빠진 범주를 거절하는지) 으로 한다. 이 실험은 그 전 단계로 OE 가 같은 데이터에서 제대로 학습되는지 본다
+
 ## 5. 실험 B: 내용 (Q2)
 
 negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의 절반(1,000개)의 내용뿐**이다.
@@ -191,6 +215,7 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | A00 (MSP) | 89.8% / 0% (greedy) | 0.991 | | | | | | |
 | A05 | | | | | | | | |
 | A20 | | | | | | | | |
+| OE (MSP) | | | | | | | | |
 | A50 = B0 | 88.8% / 99.8% | 1.000 | | | | | | |
 | B1 | | | | | | | | |
 | B2 | | | | | | | | |
@@ -202,6 +227,10 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 - B2 에서 편집 거리 기준값, 사람 검토 합격선 90% 가 적절한지 (소규모 실행 후 정함)
 - 음악 함수 과잉 거절 관련: 현재 negative 범주 7번에 "music on the phone itself" 가 있고, train positive 음악 질의 98/100 이 서비스·플레이리스트를 명시한다.
   이건 negative 문제가 아니라 **positive 쪽 표현 다양성** 문제일 수 있다 (추정). 이번 실험에서는 positive 를 고정하므로 다루지 않고, 필요하면 별도 실험 C 로 둔다
+- 실험 C 파일럿 (2026-11-22, 논문에 없는 추가): positive 를 시작 단어("Uhm," "Hmm," "You know," 등 8개)로 시작하게 생성한 뒤 잘라내기 (`generate.py --openers`).
+  함수 3개 × 90개, 말투·후보·seed 같게 두고 비교. 문장 첫 단어 종류만 늘었고 (24 → 37), 단어 다양성·기존 train 과의 유사도는 거의 그대로 (0.336 → 0.325).
+  말투 조건(STYLES)이 결과를 좌우하고 시작 단어는 앞부분만 바꾼다. 단독으로는 효과가 작음 → 실험 C 를 한다면 상황·페르소나처럼 내용을 바꾸는 쪽을 함께 검토.
+  결과: `data/raw/opener_pilot_{base,fill}/`, 비교 `data/raw/opener_pilot_fill/compare.txt`
 
 ## 10. 변경 기록
 
@@ -214,3 +243,4 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-18 | **기준 모델(ours = A50·B0, 공개 모델)의 MASSIVE 결과를 봤다** (MASSIVE_TEST.md 결과 절) | 7절 5단계보다 먼저 채점함. 이후 실험 A·B 의 데이터·설정을 이 결과로 바꾸지 않는다. dev 문턱값이 MASSIVE 로 옮겨지지 않는 문제가 보였지만 6절 주 지표는 아직 바꾸지 않음 |
 | 2026-11-22 | 실험 A00 추가 (4.1절): negative 0% + MSP 거절. 예측을 돌리기 전에 기록 | 연구 방향 논의 중 나온 아이디어. MASSIVE 결과를 본 뒤의 추가라서, MASSIVE·BFCL 채점은 7절 5단계까지 미룬다 |
 | 2026-11-22 | **A00 결과를 본 뒤** MSP 점수 규칙 수정: 함수 토큰을 안 고른 출력은 0 대신 그 단계 상위 5개의 함수 토큰 확률로 계산 (`src/refusal_metrics.py`) | A00 이 negative 24개에서 함수 이름을 지어냈는데 0 이면 "가장 확신한 호출" 로 세져 점수의 뜻과 반대. irr 점수 규칙은 그대로. 수정 전 dev AUROC 0.931, 수정 후 0.991. 노트북 09 출력은 수정 전 숫자 |
+| 2026-11-22 | 실험 OE 추가 (4.2절): negative 를 Outlier Exposure loss 로 학습 + MSP 거절. 예측을 돌리기 전에 기록 | 매핑 가설(거절을 학습 negative 종류의 매핑으로 외운다)에서 나온 처방. A00 결과를 본 뒤의 추가 |

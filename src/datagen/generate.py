@@ -40,6 +40,19 @@ IRRELEVANT = NAME_TO_INDEX["irrelevant_function"]
 _WAKE_WORD = re.compile(r"^\W*(hey|hi|ok|okay)\s+(google|phone|assistant|siri|alexa|bixby|nexa|octopus)\b", re.I)
 
 
+_OPENER = re.compile(r"^\W*(" + "|".join(re.escape(o) for o in sorted(prompts.OPENERS, key=len, reverse=True))
+                     + r")\s*(?:,|\.{2,}|\u2026)\s*", re.I)  # \ud504\ub86c\ud504\ud2b8\uac00 "Uhm," \ucc98\ub7fc \uc27c\ud45c\ub97c \uc694\uad6c\ud558\ubbc0\ub85c \uc27c\ud45c\u00b7\ub9d0\uc904\uc784\ud45c\uac00 \uc788\uc744 \ub54c\ub9cc \uc790\ub978\ub2e4
+
+
+def strip_opener(q: str) -> tuple[str, bool]:
+    """시작 단어를 잘라내고 첫 글자를 대문자로. (잘라낸 질의, 시작 단어가 실제로 있었는지)"""
+    m = _OPENER.match(q)
+    if not m:
+        return q, False
+    rest = q[m.end():].strip()
+    return (rest[:1].upper() + rest[1:]) if rest else q, bool(rest)
+
+
 def _norm(q: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", q.lower()).strip()
 
@@ -89,8 +102,10 @@ def _run_parallel(llm, jobs: list[tuple[str, dict]], workers: int) -> list[dict 
 # ---------------------------------------------------------------- ① 질의 생성
 
 def generate_queries(llm, token_ids: list[int], per_function: int, negatives: int,
-                     overgen: float, batch: int, workers: int, seed: int, split: str) -> list[dict]:
+                     overgen: float, batch: int, workers: int, seed: int, split: str,
+                     openers: bool = False) -> list[dict]:
     rng = random.Random(seed)
+    orng = random.Random(seed + 1)  # 시작 단어는 따로 뽑아서, 말투·후보 순서가 openers 유무와 같게 한다
     pools = ValuePools(split, seed)
     jobs, metas = [], []
     for tid in token_ids:
@@ -98,8 +113,9 @@ def generate_queries(llm, token_ids: list[int], per_function: int, negatives: in
         for b in range(math.ceil(per_function * overgen / batch)):
             style = rng.choice(prompts.STYLES)
             candidates = pools.candidates(fn["name"], batch)
-            jobs.append((prompts.positive_queries(fn, batch, style, candidates), prompts.QUERIES_SCHEMA))
-            metas.append({"kind": "positive", "token_id": tid, "variant": style})
+            opener = orng.choice(prompts.OPENERS) if openers else None
+            jobs.append((prompts.positive_queries(fn, batch, style, candidates, opener), prompts.QUERIES_SCHEMA))
+            metas.append({"kind": "positive", "token_id": tid, "variant": style, **({"opener": opener} if opener else {})})
     # 범주 순서를 섞어서, 배치 수가 적어도 헷갈리기 쉬운 범주(뒤쪽 셋)가 빠지지 않게 한다
     categories = rng.sample(prompts.NEGATIVE_CATEGORIES, len(prompts.NEGATIVE_CATEGORIES))
     for b in range(math.ceil(negatives * overgen / batch)):
@@ -108,9 +124,14 @@ def generate_queries(llm, token_ids: list[int], per_function: int, negatives: in
         metas.append({"kind": "negative", "token_id": IRRELEVANT, "variant": category})
 
     print(f"① queries: {len(jobs)} calls")
-    rows, seen, dupes, wake = [], set(), 0, 0
+    rows, seen, dupes, wake, no_opener = [], set(), 0, 0, 0
     for meta, out in zip(metas, _run_parallel(llm, jobs, workers)):
         for q in (out or {}).get("queries", []):
+            raw = q
+            if meta.get("opener"):
+                q, found = strip_opener(q)
+                if not found:
+                    no_opener += 1
             key = _norm(q)
             if not key or key in seen:
                 dupes += 1
@@ -119,8 +140,11 @@ def generate_queries(llm, token_ids: list[int], per_function: int, negatives: in
                 wake += 1
                 continue
             seen.add(key)
-            rows.append({"id": len(rows), **meta, "function": FUNCTIONS[meta["token_id"]]["name"], "query": q.strip()})
+            rows.append({"id": len(rows), **meta, "function": FUNCTIONS[meta["token_id"]]["name"], "query": q.strip(),
+                         **({"raw_query": raw} if meta.get("opener") else {})})
     print(f"   {len(rows)} unique queries ({dupes} duplicates, {wake} wake-word queries dropped)")
+    if openers:
+        print(f"   {no_opener} queries did not start with the requested opener (kept as is)")
     return rows
 
 
@@ -268,7 +292,8 @@ def _dry_run(token_ids: list[int]) -> None:
     example = [{"id": 0, "query": "<example query>", "args": {p: "<value>" for p in fn["params"]}}]
     for title, text in [
         ("① positive queries", prompts.positive_queries(fn, 10, prompts.STYLES[0],
-                                                       ValuePools("train", 0).candidates(fn["name"], 10))),
+                                                       ValuePools("train", 0).candidates(fn["name"], 10),
+                                                       prompts.OPENERS[0])),
         ("① negative queries", prompts.negative_queries(10, prompts.NEGATIVE_CATEGORIES[5])),
         ("② arguments", prompts.arguments(fn, example)),
         ("③ verify positive", prompts.verify_positive(fn, example)),
@@ -293,6 +318,8 @@ def main() -> None:
     p.add_argument("--split", default="train", choices=["train", "test"],
                    help="which half of the name/city pools to use (test values never appear in train)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--openers", action="store_true",
+                   help="(논문에 없는 추가) positive 질의를 시작 단어(prompts.OPENERS)로 시작하게 생성한 뒤 잘라낸다")
     p.add_argument("--dry-run", action="store_true", help="print prompts without calling the API")
     a = p.parse_args()
 
@@ -315,7 +342,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     queries = _cached(out_dir / "queries.jsonl", lambda: generate_queries(
-        llm, token_ids, a.per_function, a.negatives, a.overgen, a.batch, a.workers, a.seed, a.split))
+        llm, token_ids, a.per_function, a.negatives, a.overgen, a.batch, a.workers, a.seed, a.split, a.openers))
     positives = _cached(out_dir / "positives.jsonl", lambda: process_positives(
         llm, queries, a.batch, a.workers, a.rounds))
     negatives = _cached(out_dir / "negatives.jsonl", lambda: process_negatives(
