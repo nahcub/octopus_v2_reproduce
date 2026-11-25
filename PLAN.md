@@ -68,12 +68,16 @@
   - [x] 코드: `src/neg_categories.py` (범주 라벨), `src/train.py --exclude-neg-category`, `src/negcat_report.py` (범주별 표)
   - [x] Colab: writing·smart_home × token·oe 학습 4번 + 우리 test 채점
   - [x] 결과를 4.3절 예측과 비교해 README 에 정리 (예측 빗나감: smart_home 을 빼도 45/50 거절)
-- [ ] (논문에 없는 추가) 실험 S: 같은 문장을 말투만 바꿔 학습 = 거절이 말투에 기대는지 (`notebooks/12_exp_S_style.ipynb`, 설계·예측은 `EXPERIMENT_DESIGN.md` 4.4절)
+- [x] (논문에 없는 추가) 실험 S: 같은 문장을 말투만 바꿔 학습 = 거절이 말투에 기대는지 (`notebooks/12_exp_S_style.ipynb`, 설계·예측은 `EXPERIMENT_DESIGN.md` 4.4절)
   - [x] 코드: `src/datagen/restyle.py` (재작성·검증·학습 파일), `src/style_report.py` (말투별 표·판정)
   - [x] 소규모 실행 (함수 4개 × 5 + negative 20, 말투 5개). form 말투에 함수 이름이 새는 문제를 프롬프트로 막음
   - [x] 전체 재작성 (train 4,000 + dev 400, × 5 말투) → `data/style/`. 말투별 positive 통과 96.3~99.1%. 비용 약 $10 (중간에 Gemini 월 지출 한도 429 로 nonnative 를 다시 돌림)
-  - [ ] Colab: S_all·S_minus_howto·S_minus_fragment 학습 + ours 포함 말투별 채점
-  - [ ] 결과를 4.4절 예측과 비교해 README 에 정리
+  - [x] Colab: S_all·S_minus_howto·S_minus_fragment 학습 + ours 포함 말투별 채점
+  - [x] 결과를 4.4절 예측과 비교해 README 에 정리 (뺀 말투에서 차이 5%p 미만 → 판정 안 함. form 에서만 ours negative 거절 82.4%)
+  - [ ] (사후 선택) form 을 뺀 S_minus_form 학습으로 form 에서 일반화 확인 (`notebooks/13_exp_S_form.ipynb`)
+    - [x] 학습 파일 빌드, `style_report` 에 form·정확도 판정 추가, 예측 기록 (4.4절)
+    - [ ] Colab 학습 + 채점
+    - [ ] 결과를 4.4절 예측과 비교해 README 에 정리
 - [ ] 학습 타깃에 `Function description` 을 붙이는 것 vs 안 붙이는 것 (논문은 붙이지만 효과를 따로 실험하지 않음)
 - [ ] negative 비율 (논문 1:1 vs 더 적게)
 - 5단계 오답에서 나온 후보 (논문에 없는 추가)

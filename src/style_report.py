@@ -20,7 +20,7 @@ from pathlib import Path
 from src.refusal_metrics import auroc, load_jsonl, refusal_scores
 
 STYLES = ["orig", "howto", "fragment", "need", "form", "nonnative"]
-HELD = {"S_minus_howto": "howto", "S_minus_fragment": "fragment"}
+HELD = {"S_minus_howto": "howto", "S_minus_fragment": "fragment", "S_minus_form": "form"}
 
 
 def report(rows: list[dict], probs: list[dict]) -> dict:
@@ -71,7 +71,7 @@ def main() -> None:
         for name, k in HELD.items():
             if name not in res:
                 continue
-            for key, sign in (("pos_refused", 1), ("neg_refused", -1)):
+            for key, sign in (("pos_refused", 1), ("neg_refused", -1), ("pos_exact", -1)):
                 o, m, al = (res[x][k][key] for x in ("ours", name, "S_all"))
                 gap = sign * (o - al)
                 if gap < 0.05:

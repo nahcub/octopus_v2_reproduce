@@ -278,6 +278,42 @@ step 수를 맞추면 이번에는 positive 를 보는 횟수가 달라지므로
 - dev 문장 2,340개 중 41개가 train 문장과 같다 (대부분 orig, 원래 test 의 seen_in_train 과 같은 성격). 빼지 않음
 - 소규모 실행에서 고친 것: form 말투가 `action: take_photo` 처럼 함수 이름을 쓰는 지름길 → 함수 이름·snake_case 금지. howto 의 질문형 negative 는 원문이 이미 그 말투라 그대로 둠
 
+**결과** (2026-11-23 Colab A100 80GB, 2026-11-25 정리. dev 390개 × 6 말투, `data/raw/eval/style/`, `src/style_report.py`)
+
+| 모델 | positive 거절 (최대인 말투) | negative 거절 (최저인 말투) | positive 엄격 정확도 orig / howto / fragment / need / form / nonnative |
+|---|---|---|---|
+| ours | 3.1% (howto) | **82.4% (form)**, fragment 97.0% | 92.1 / 85.9 / 74.3 / 84.3 / **69.6** / 74.3 |
+| S_all | 0.5% (fragment) | 99.0% (nonnative) | 91.6 / 89.5 / 77.5 / 84.8 / 84.8 / 80.1 |
+| S_minus_howto | 0.5% (*howto) | 99.5% (form) | 88.5 / *89.0 / 81.2 / 87.4 / 85.9 / 77.5 |
+| S_minus_fragment | 0.5% (*fragment) | 98.5% (form) | 87.4 / 85.3 / *75.9 / 83.8 / 83.8 / 77.5 |
+
+AUROC(irr) 는 ours form 0.994 를 빼면 모든 모델·말투에서 1.000. `*` = 학습에서 뺀 말투
+
+- **예측과 비교**
+  - ours howto positive 거절 15% 이상 → **빗나감** (3.1%, 191개 중 6개). fragment 5% 이상 → **빗나감** (0%)
+  - ours negative 거절이 fragment·form 중 하나 이상에서 90% 아래 → **맞음** (form 82.4%)
+  - S_all 모든 말투 positive 거절 ≤3%, negative 거절 ≥95% → **맞음**. orig 정확도 ours 와 2%p 이내 → 맞음 (−0.5%p)
+- **판정 규칙**: 뺀 두 말투(howto·fragment) 모두 ours − S_all 차이가 5%p 미만 (positive 거절 +3.1%p·−0.5%p, negative 거절 0·+3.0%p) → 미리 정한 규칙대로 **판정 안 함**. ours 가 이 두 말투에서 처음부터 거의 틀리지 않아서 일반화 가설과 말투 암기 가설을 가를 차이가 없었다
+- **결과를 본 뒤 찾은 것** (사전 계획 아님)
+  - 크게 깨진 말투는 form 하나. ours 가 거절하지 못한 form negative 35개 중 13개가 `get_trending_news`(`topic: ...` 꼴), 8개가 `send_text_message`(`message type: ...` 꼴), 4개가 `connect_to_bluetooth_device`. 즉 내용이 아니라 `topic`·`message` 같은 **칸 이름 단어**에 끌려간 것으로 보인다 (추정)
+  - howto 에서 거절된 positive 6개 중 4개가 "How do I text ~ / Is it possible to text ~" 꼴의 send_text_message
+  - form 말투를 학습한 모델(S_all·S_minus 둘 다)은 form negative 를 98.5~99.5% 거절. 다만 form 을 뺀 모델이 없어서 일반화 시험은 아님
+  - 정확도도 ours 는 form 69.6% (오답 58개 중 56개가 함수는 맞고 인자가 틀림). 참고로 정확도 기준 메운 비율은 howto 0.86, fragment 0.50 이지만 차이가 3~4%p 라 판정 규칙 밖
+- **해석** (추정)
+  - Gemini 가 쓴 howto·fragment 처럼 **말투(어조·문장 모양)만 바뀐 건 ours 를 거의 흔들지 못했다.** 사용자 예측("의미보다 말투 규칙성에 기댄다") 중 어조 부분은 이 데이터로는 지지되지 않음
+  - 대신 **문장 구조가 key: value 꼴로 바뀌고 함수와 겹치는 단어가 칸 이름으로 드러나면** negative 를 함수로 보낸다. "표면 단서에 기댄다" 는 쪽은 형태를 바꿔 지지됨
+  - 공식 210 에서 ours 가 69% 였던 것은 howto 질문형 때문이라고 보기 어렵다 (Gemini 가 쓴 howto 에선 3.1% 만 거절). 다른 원인(값 형식·라벨 규칙·생성기 차이) 쪽이 남는다
+  - 한계: 말투를 바꾼 것도 Gemini 라 생성기가 하나. 사람이 쓴 문장(MASSIVE)에서는 다를 수 있음
+
+**추가 실험 S_minus_form** (2026-11-25 추가, **사후 선택**: 위 결과에서 ours 와 S_all 차이가 큰 말투가 form 하나라서 고름. `notebooks/13_exp_S_form.ipynb`)
+- **학습**: orig + form 뺀 4개 말투 (`data/style/train_S_minus_form.jsonl`, 4,000개). 같은 seed·방식으로 다시 빌드했고 기존 학습 파일 3개는 바이트까지 그대로
+- form 을 빼면 학습에 key: value 꼴 문장이 거의 없다 (콜론·등호가 두 번 이상인 문장: S_all 364개 → S_minus_form 20개, 전부 fragment)
+- **채점·판정**: 위와 같은 dev 390 × 6, 같은 규칙. form 에서 ours−S_all 차이가 negative 거절 17.1%p, 정확도 15.2%p 로 둘 다 5%p 이상이라 판정 가능. positive 거절은 둘 다 0% 라 판정 안 함
+  - 주 지표: negative 거절 메운 비율. 보조: positive 엄격 정확도 메운 비율 (`style_report` 판정 줄에 같이 출력하도록 이번에 추가)
+- **예측** (돌리기 전에 적어 둠)
+  - Claude: negative 거절은 **일반화 (메운 비율 ≥ 0.5, form negative 거절 91% 이상)**, 확신은 낮음. 근거: 어조를 바꾼 howto·fragment 에서 ours 가 이미 버텼고, 4개 말투로 넓히면 "칸 이름 단어 하나" 에 끌리는 경향이 약해질 것. 정확도는 **말투 암기 (< 0.5)**: key: value 에서 값을 잘라 내는 형식은 직접 봐야 익힐 것
+  - 사용자: (노트북 13 맨 위 칸에 적은 것을 여기에 옮김)
+
 ## 5. 실험 B: 내용 (Q2)
 
 negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의 절반(1,000개)의 내용뿐**이다.
@@ -382,3 +418,5 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-22 | OE 결과를 본 뒤 분석 추가: 공식 positive 의 거절 그룹별 train negative 유사도 (`src/neg_similarity.py`, 4.2절) | A50 만 거절한 positive 가 매핑으로 설명되는지 보려고. 사전에 계획한 분석이 아님 |
 | 2026-11-22 | 실험 X 결과 기록 (4.3절). smart_home 을 뺀 token 모델이 그 범주를 45/50 거절해 예측(25 이하)이 빗나감. 놓친 5개 문항 분석은 결과를 본 뒤 추가 | 미리 정한 기준대로 "여집합 쪽" 으로 보고 |
 | 2026-11-22 | 실험 S 추가 (4.4절): 같은 문장을 말투 5가지로 다시 써서 학습·채점. 예측과 판정 규칙을 돌리기 전에 기록 | 실험 X 결과를 본 뒤. 거절이 의미보다 말투에 기대는지 (사용자 예측) vs 말투를 넓히면 처음 보는 말투에도 일반화되는지 가르려고 |
+| 2026-11-25 | 실험 S 결과 기록 (4.4절). 뺀 말투 howto·fragment 에서 ours 가 이미 거의 틀리지 않아(차이 5%p 미만) 판정 안 함. form 말투에서만 ours negative 거절 82.4% | 미리 정한 규칙대로. form 분석은 결과를 본 뒤 추가 |
+| 2026-11-25 | 실험 S 에 S_minus_form 추가 (사후 선택). `style_report` 판정에 positive 정확도 메운 비율 추가. 예측을 돌리기 전에 기록 | 4.4절 결과에서 차이가 5%p 넘은 말투가 form 하나뿐이라 원래 질문(일반화 vs 말투 암기)을 거기서 묻는다 |

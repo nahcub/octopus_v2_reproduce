@@ -223,7 +223,8 @@ def cmd_rewrite(a) -> None:
 # ---------------------------------------------------------------- 학습·채점 파일
 
 TRAIN_SETS = {"S_all": list(STYLES), "S_minus_howto": [s for s in STYLES if s != "howto"],
-              "S_minus_fragment": [s for s in STYLES if s != "fragment"]}
+              "S_minus_fragment": [s for s in STYLES if s != "fragment"],
+              "S_minus_form": [s for s in STYLES if s != "form"]}  # 실험 S 결과를 보고 추가 (사후 선택)
 KEYS = ["kind", "function", "token_id", "query", "args", "call"]
 
 
