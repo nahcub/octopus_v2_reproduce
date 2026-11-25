@@ -345,6 +345,18 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
 - **설계·예측·판정 규칙**: EXPERIMENT_DESIGN.md 4.4절 (돌리기 전에 기록)
 - **결과**: 아직 없음
 
+## 실험 G: 함수 토큰 대신 JSON 으로 부르는 일반 모델 (논문에 없는 추가, `notebooks/13_exp_G_general.ipynb`)
+- **묻는 것**: 지금까지의 거절 현상(낯선 말투 과잉 거절, near-miss 오호출, 문턱값 이식 실패, 말투 의존)이 함수 토큰 방식이라서 생기나, 함수 호출 모델 공통인가
+- **바꾸는 것: 출력 방식 하나.** 프롬프트에 함수 21개 JSON 스키마(BFCL·OpenAI 식)를 넣고, 정답을 `{"name": …, "arguments": {…}}` 로 학습. 거절은 `irrelevant_function` 을 목록 21번째로.
+  새 토큰 없음. 나머지(gemma-2b, train 4,000, full FT, lr·epoch·batch 16, seed 0)는 ours 와 같다 (`src/general.py`, `python -m src.train --format json`)
+- 문장이 약 2,350 토큰(ours 의 약 21배)이라 batch 16 을 4×4 로 나눠 담고, loss 는 정답 자리만 출력층에 통과시켜 계산한다 (값은 같고 메모리만 줄어듦)
+- **채점**: JSON 출력을 `<nexa_i>(…)<nexa_end>` 로 바꿔 기존 채점기 그대로. 거절 점수는 함수 이름 21개를 하나씩 넣어 본 확률 → 기존 `probs.jsonl` 형식이라 `refusal_metrics`·`negcat_report`·`style_report` 그대로.
+  ours 는 전체 사전 기준 확률, G 는 21개 안의 확률이라 문턱값 숫자끼리는 비교하지 않는다
+- **설계·예측·판정 규칙**: EXPERIMENT_DESIGN.md 4.5절 (돌리기 전에 기록)
+- **랩탑 확인** (작은 무작위 모델, CPU): 학습 2 step → 생성 → 채점 → 거절 점수 → `refusal_metrics` 까지 돈다. 정답 자리만 계산한 loss 와 기본 loss 차이 1e-6,
+  빠른 이름 점수(앞부분 한 번 + KV cache)와 느린 점수(21개 문장 각각) 차이 3e-6, 정답 JSON 7,140개를 바꾸면 data 의 `call` 과 글자까지 같음
+- **결과**: 아직 없음
+
 ## 이후 연구 (2부, 별도 저장소)
 2026-11-19 부터 함수 목록을 바꾼 통제 실험은 `../tool_calling_project` 에서 한다 (코드는 이 저장소 커밋 `8a00257` 에서 복사).
 연구 방향·관련 연구·평가 출처 조사 문서도 그쪽 `docs/` 로 옮겼다. 이 저장소는 1부(재현·진단)를 정리해 고정한다.

@@ -278,6 +278,48 @@ step 수를 맞추면 이번에는 positive 를 보는 횟수가 달라지므로
 - dev 문장 2,340개 중 41개가 train 문장과 같다 (대부분 orig, 원래 test 의 seen_in_train 과 같은 성격). 빼지 않음
 - 소규모 실행에서 고친 것: form 말투가 `action: take_photo` 처럼 함수 이름을 쓰는 지름길 → 함수 이름·snake_case 금지. howto 의 질문형 negative 는 원문이 이미 그 말투라 그대로 둠
 
+### 4.5 실험 G: 함수 토큰 대신 JSON 으로 부르는 일반 모델 (2026-11-25 추가, 논문에 없는 추가)
+
+- **배경**: 지금까지의 현상 — 낯선 말투 positive 과잉 거절(4.2절, 공식 210 에서 65/200), near-miss 오호출(4.3절 놓친 5개),
+  dev 문턱값 이식 실패(4.1절), 말투 의존(4.4절에서 확인 중) — 이 함수 토큰 방식의 특징인지, 함수 호출 모델의 공통 특징인지 모른다.
+  논문 주제("함수 토큰 모델의 거절은 어떻게 학습되나")의 범위를 정하려면 함수 토큰이 아닌 비교 모델이 필요하다
+- **바꾸는 것: 출력 방식 하나** (`src/general.py`, `src/train.py --format json`, 노트북 13)
+
+| | ours (기존 A50, 다시 학습 안 함) | G |
+|---|---|---|
+| 프롬프트 | 지시문 + 질의 (모델 카드 문구) | 같은 지시문 + **함수 21개 JSON 스키마** + 같은 질의 부분 (약 2,350 토큰) |
+| 정답 | ` <nexa_i>(…)<nexa_end>` + Function description | ` {"name": …, "arguments": {…}}` + `<eos>` (Function description 없음: 설명은 이미 프롬프트에 있다) |
+| 거절 | `<nexa_20>` | `irrelevant_function` 을 목록 21번째로 두고 `{"name": "irrelevant_function", "arguments": {}}` |
+| 새 토큰 | 22개 | 없음 |
+
+- **고정하는 것**: 2절 그대로 (gemma-2b, `data/train.jsonl` 4,000개, full FT, AdamW lr 5e-5, warm-up 10, linear, 3 epoch, batch 16, weight decay 0, seed 0).
+  단 문장이 길어서 batch 16 을 4개씩 4번에 나눠 담는다 (`--batch-size 4 --grad-accum 4`, gradient checkpointing). loss 는 정답 자리만 출력층에 통과시켜 계산한다
+  (`AnswerOnlyLossTrainer`, 정답 토큰 합 / num_items_in_batch = transformers 기본 causal LM loss 와 같은 식). 계산 결과는 같고 메모리만 줄어든다 (작은 모델로 차이 1e-6 확인)
+- **함수 스키마**: `toy_api.DESCRIPTIONS` 원문에서 옮김. 함수 설명 = 첫 단락, 인자 설명 = 원문 인자 줄 그대로, 타입 str/int/float/bool → string/integer/number/boolean,
+  enum → string + 원문에 따옴표로 적힌 선택지, 모든 인자 required (ours 정답도 기본값까지 채움). BFCL·OpenAI 식 표준 모양을 고른 이유: 다른 연구와 같은 방식이라고 설명할 수 있어서
+- **채점**
+  - 정답 채점: G 의 JSON 출력을 `<nexa_i>(…)<nexa_end>` 로 바꿔 기존 `src.evaluate score` 그대로. 정답 JSON 7,140개(train·test·말투 test)를 바꾸면 data 의 `call` 과 글자까지 같음을 확인
+  - 거절 점수: 함수 이름 21개를 하나씩 정답 자리(` {"name": "` 뒤)에 넣어 이름 + 닫는 따옴표의 log 확률 합을 구하고 21개로 softmax → `func.dist`, `p_irrelevant`.
+    `probs.jsonl` 형식이 같아 `refusal_metrics`·`negcat_report`·`style_report` 를 그대로 쓴다. `func.chosen` 은 greedy 생성이 실제로 고른 함수 (21개 점수 1등은 `func.argmax`)
+  - **ours 와 다른 점**: ours 의 확률은 전체 사전 기준, G 는 21개 안에서 다시 나눈 값. 그래서 문턱값 숫자끼리는 비교하지 않고 AUROC·거절 개수로 비교한다. 이름 길이 보정은 하지 않음 (실제 문장 확률)
+- **평가 세트**: 우리 test(dev 800), 공식 210, 말투 test(`data/style/dev_styled.jsonl`, 2,340). MASSIVE·BFCL 은 8절 규칙대로 모든 모델이 확정된 뒤 한 번
+- **보는 것** (모두 ours 와 G 를 나란히, 차이는 `refusal_metrics` 의 짝지은 bootstrap 95% 구간)
+  1. 공식 210 positive 과잉 거절: greedy 거절 수, dev 문턱값 적용 거절 수 (ours 17 / 65)
+  2. dev negative 범주별 거절 (`negcat_report`), 특히 near-miss 인 smart_home·phone_settings·other_apps
+  3. 말투 test 의 말투별 positive 거절률·negative 거절률 (`style_report`, ours 는 4.4절 결과를 같이 씀)
+  4. dev·공식 AUROC
+- **판정 규칙** (돌리기 전에 정함)
+  - 1·2 에서 G 와 ours 차이의 95% 구간이 0 을 포함하지 않으면 그 현상은 "**함수 토큰 쪽이 다르다**", 포함하면 "**공통**" 으로 보고
+  - 3 은 말투 6개 중 positive 거절률의 최댓값 − 최솟값을 두 모델에서 비교 (G 도 10%p 이상 벌어지면 말투 의존은 "공통")
+  - 어느 쪽이든 그대로 보고. 논문에서는 "공통" 인 현상만 함수 호출 모델 일반의 성질로 쓰고, "다르다" 인 현상은 함수 토큰 방식의 성질로 쓴다
+- **예측** (돌리기 전에 적어 둠)
+  - Claude 예측 (추정): G 는 함수 설명을 매번 보므로 공식 210 의 낯선 말투 positive 를 ours 보다 덜 거절한다 (1 은 "다르다").
+    near-miss 오호출(2)과 말투 의존(3)은 G 에도 남는다 ("공통"). dev AUROC 는 두 모델 모두 0.99 이상
+  - 사용자 예측: (돌리기 전에 채움)
+- **한계**: G 는 함수 목록을 프롬프트로 보고 ours 는 외운다. 이 차이는 두 방식의 본질적인 차이라 따로 떼지 않는다 (논문에 적는다).
+  형식(JSON) 하나만 시험한다. 여유가 있으면 파이썬 호출 모양으로도 한 번 돌려 결론이 같은지 본다
+- **런타임**: Colab A100 80GB (다른 실험과 같은 장비). 문장이 ours 의 약 21배라 학습이 수 시간 걸릴 것으로 추정 → 노트북 2번 시험 학습(30 step)에서 step 당 시간과 최대 메모리를 먼저 잰다
+
 ## 5. 실험 B: 내용 (Q2)
 
 negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의 절반(1,000개)의 내용뿐**이다.
@@ -382,3 +424,4 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-22 | OE 결과를 본 뒤 분석 추가: 공식 positive 의 거절 그룹별 train negative 유사도 (`src/neg_similarity.py`, 4.2절) | A50 만 거절한 positive 가 매핑으로 설명되는지 보려고. 사전에 계획한 분석이 아님 |
 | 2026-11-22 | 실험 X 결과 기록 (4.3절). smart_home 을 뺀 token 모델이 그 범주를 45/50 거절해 예측(25 이하)이 빗나감. 놓친 5개 문항 분석은 결과를 본 뒤 추가 | 미리 정한 기준대로 "여집합 쪽" 으로 보고 |
 | 2026-11-22 | 실험 S 추가 (4.4절): 같은 문장을 말투 5가지로 다시 써서 학습·채점. 예측과 판정 규칙을 돌리기 전에 기록 | 실험 X 결과를 본 뒤. 거절이 의미보다 말투에 기대는지 (사용자 예측) vs 말투를 넓히면 처음 보는 말투에도 일반화되는지 가르려고 |
+| 2026-11-25 | 실험 G 추가 (4.5절): 함수 토큰 대신 JSON 출력 일반 모델. 코드 `src/general.py`, `src/train.py --format json`, 노트북 13. 판정 규칙·예측을 돌리기 전에 기록 | 논문 주장의 범위(함수 토큰 특유 vs 함수 호출 모델 공통)를 정하려고. 기준 모델 학습 방식은 full FT 로 확인 (2절 표의 "LoRA" 표기와 실제 학습이 달라 확인함) |

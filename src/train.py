@@ -21,6 +21,11 @@
 
     # 실험 OE (논문에 없는 추가): negative 를 <nexa_20> 이 아니라 "함수 토큰 20개가 고르게" 로 학습 (Outlier Exposure)
     python -m src.train --neg-loss oe --output-dir /content/drive/MyDrive/octopus_v2/runs/OE
+
+    # 실험 G (논문에 없는 추가): 함수 토큰 없이, 프롬프트에 함수 목록 + JSON 출력 (src/general.py).
+    # 문장이 약 2,350 토큰이라 batch 16 을 나눠 담는다 (실제 batch = batch-size × grad-accum = 16 그대로)
+    python -m src.train --format json --batch-size 4 --grad-accum 4 --gradient-checkpointing \
+        --output-dir /content/drive/MyDrive/octopus_v2/runs/G
 """
 
 from __future__ import annotations
@@ -96,8 +101,26 @@ class OETrainer(Trainer):
         super().log(logs, *a, **kw)
 
 
+class AnswerOnlyLossTrainer(Trainer):
+    """(논문에 없는 추가, 실험 G --format json) 프롬프트에 함수 목록이 들어가 문장이 약 2,350 토큰이다.
+    모델 기본 loss 는 모든 자리의 사전 확률(256,000칸)을 만들어서 메모리가 크게 든다 (문장 하나에 수 GB).
+    정답 자리만 골라 출력층에 통과시켜 같은 값을 계산한다 (정답 토큰 cross-entropy 를 num_items_in_batch 로 나눔 =
+    transformers 기본 causal LM loss 와 같은 식). 계산 결과는 같고 메모리만 줄어든다."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        hidden = model.model(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"]).last_hidden_state
+        y = labels[:, 1:]
+        keep = y != IGNORE_INDEX
+        logits = model.lm_head(hidden[:, :-1][keep]).float()  # 자리 t 가 토큰 t+1 을 예측
+        loss_sum = torch.nn.functional.cross_entropy(logits, y[keep], reduction="sum")
+        n = num_items_in_batch if num_items_in_batch is not None else keep.sum()
+        loss = loss_sum / n
+        return (loss, None) if return_outputs else loss
+
+
 @torch.no_grad()
-def initial_check(model, tokenizer, examples: list[dict], device) -> None:
+def initial_check(model, tokenizer, examples: list[dict], device, json_format: bool = False) -> None:
     """학습 전 한 묶음의 loss. 새 토큰은 아직 뜻이 없어서 <nexa_*> 자리의 loss 가 특히 높아야 정상."""
     model.eval()
     batch = {k: v.to(device) for k, v in collate(examples, tokenizer.pad_token_id).items()}
@@ -115,6 +138,10 @@ def initial_check(model, tokenizer, examples: list[dict], device) -> None:
         logits.reshape(-1, logits.size(-1)), labels.reshape(-1), ignore_index=IGNORE_INDEX, reduction="none"
     ).view(labels.shape)
     scored = labels != IGNORE_INDEX
+    if json_format:  # 새 토큰이 없다
+        print(f"[학습 전 loss] 전체(모델 출력) {out.loss.item():.3f} | 채점 자리 평균 {per_token[scored].mean().item():.3f}")
+        model.train()
+        return
     nexa = labels >= len(tokenizer) - 22  # 새로 추가한 22개 번호
     print(f"[학습 전 loss] 전체(모델 출력) {out.loss.item():.3f} | 채점 자리 평균 {per_token[scored].mean().item():.3f}"
           f" | <nexa_*> 자리 {per_token[nexa].mean().item():.3f} | 나머지 정답 자리 {per_token[scored & ~nexa].mean().item():.3f}")
@@ -136,6 +163,8 @@ def main() -> None:
     p.add_argument("--oe-lambda", type=float, default=0.5, help="oe loss 가중치 (Outlier Exposure 원 논문 값 0.5)")
     p.add_argument("--exclude-neg-category", default=None,
                    help="(논문에 없는 추가) 실험 X: 이 범주의 negative 를 학습에서 뺀다 (src/neg_categories.SHORT 중 하나)")
+    p.add_argument("--format", choices=["token", "json"], default="token",
+                   help="(논문에 없는 추가, 실험 G) json: 함수 토큰 없이 프롬프트에 함수 목록을 넣고 JSON 으로 호출 (src/general.py)")
     p.add_argument("--output-dir", default="runs/full")
     p.add_argument("--epochs", type=float, default=3)
     p.add_argument("--lr", type=float, default=5e-5)
@@ -154,10 +183,13 @@ def main() -> None:
 
     # 1) 토크나이저 + 모델, 칸 늘리기
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    nexa_ids = add_functional_tokens(tokenizer)
+    json_format = args.format == "json"
+    assert not (json_format and args.neg_loss == "oe"), "--format json 은 --neg-loss token 만 지원"
+    nexa_ids = [] if json_format else add_functional_tokens(tokenizer)  # json: 새 토큰 없음, 사전 그대로
     model = load_model(args.model, args.tiny, vocab_size=len(tokenizer) - len(nexa_ids))
     before = model.get_input_embeddings().num_embeddings
-    resize_embeddings(model, tokenizer)
+    if not json_format:
+        resize_embeddings(model, tokenizer)
     after = model.get_input_embeddings().num_embeddings
     assert after >= len(tokenizer), (after, len(tokenizer))
     assert model.get_output_embeddings().weight.shape[0] == after  # Gemma 는 입력·출력 칸을 같이 쓴다 (tie)
@@ -177,13 +209,17 @@ def main() -> None:
         print(f"[데이터] negative 범주 '{args.exclude_neg_category}' 제외: {before_n} → {len(rows)}개")
     rows = rows[: args.limit]
     oe = args.neg_loss == "oe"
-    examples = [build_example(r, tokenizer, oe=oe) for r in rows]
+    if json_format:
+        from src.general import build_example as build_json_example
+        examples = [build_json_example(r, tokenizer) for r in rows]
+    else:
+        examples = [build_example(r, tokenizer, oe=oe) for r in rows]
     n_neg = sum(r["kind"] == "negative" for r in rows)
     print(f"[데이터] {len(examples)}개 (negative {n_neg}), 최대 {max(len(e['input_ids']) for e in examples)} 토큰"
           f" | negative 학습 방식: {args.neg_loss}" + (f" (λ={args.oe_lambda})" if oe else ""))
     func_ids = tokenizer.convert_tokens_to_ids([f"<nexa_{i}>" for i in range(20)])  # irrelevant(<nexa_20>) 제외
 
-    initial_check(model, tokenizer, examples[: min(8, len(examples))], device)
+    initial_check(model, tokenizer, examples[: min(2 if json_format else 8, len(examples))], device, json_format)
     if use_gpu:
         print(f"[GPU] {torch.cuda.get_device_name()} | 모델만 올렸을 때 {torch.cuda.memory_allocated() / 2**30:.1f} GiB"
               f" / 전체 {torch.cuda.get_device_properties(0).total_memory / 2**30:.1f} GiB")
@@ -212,7 +248,12 @@ def main() -> None:
     )
     common = dict(model=model, args=targs, train_dataset=examples,
                   data_collator=lambda batch: collate(batch, tokenizer.pad_token_id))
-    trainer = OETrainer(**common, func_ids=func_ids, oe_lambda=args.oe_lambda) if oe else Trainer(**common)
+    if oe:
+        trainer = OETrainer(**common, func_ids=func_ids, oe_lambda=args.oe_lambda)
+    elif json_format:
+        trainer = AnswerOnlyLossTrainer(**common)
+    else:
+        trainer = Trainer(**common)
     trainer.train()
     if use_gpu:
         print(f"[GPU] 학습 중 최대 메모리 {torch.cuda.max_memory_allocated() / 2**30:.1f} GiB")
