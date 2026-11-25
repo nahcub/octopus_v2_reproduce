@@ -345,8 +345,16 @@ CLAUDE.md 기준(공개 모델을 따른다)이면 정수가 맞지만, 바꾸�
 - **설계·예측·판정 규칙**: EXPERIMENT_DESIGN.md 4.4절 (돌리기 전에 기록)
 - **결과**: 아직 없음
 
-## 실험 G: 함수 토큰 대신 JSON 으로 부르는 일반 모델 (논문에 없는 추가, `notebooks/13_exp_G_general.ipynb`)
+## 실험 G·ND: 함수 토큰 모델 vs 일반 함수 호출 모델 (논문에 없는 추가, `notebooks/13_exp_G_general.ipynb`)
 - **묻는 것**: 지금까지의 거절 현상(낯선 말투 과잉 거절, near-miss 오호출, 문턱값 이식 실패, 말투 의존)이 함수 토큰 방식이라서 생기나, 함수 호출 모델 공통인가
+- **3모델** (2026-11-25 ND 추가): G 는 ours 와 (1) 정답 기호(새 토큰 vs 함수 이름), (2) 설명을 쓰는 방식(정답 뒤에서 외우기 vs 입력에서 보고 고르기) 두 가지가 다르다.
+  가운데에 **ND (N+설명)** 를 둔다: ours 에서 함수 토큰만 함수 이름(JSON)으로 바꾼 모델 (`python -m src.train --format json --no-list --json-desc`)
+  - 프롬프트·정답 뒤 `Function description` 은 ours 와 글자·토큰까지 같다 (train 4,000개 전체 확인). 생성은 ours 가 `<nexa_end>` 에서 멈추듯 JSON 뒤 빈 줄에서 멈춘다 (G 도 같은 규칙)
+  - 비교: **ours vs G = 주 비교** (함수 토큰 모델만의 현상인가), 다르면 ours vs ND (새 토큰 때문인가) / ND vs G (설명을 보고 고르기 때문인가)
+  - 학습 조건은 ours 와 모두 같다 (설계 문서 4.5절 표). 최종 학습은 ours 와 같은 Colab A100 80GB.
+    GPU PC(A6000 48GB) 에서는 ours 조건(`adamw_torch`, batch 16)이 메모리에 안 들어가 코드 확인용으로만 쓴다
+  - 작은 모델 확인: 학습 3 step → 생성 → 채점 → 거절 점수까지 돈다. 진짜 gemma-2b 로 빈 줄 멈춤 동작과 ND 학습 전 loss(1.449) 확인
+- 아래는 G 설명
 - **바꾸는 것: 출력 방식 하나.** 프롬프트에 함수 21개 JSON 스키마(BFCL·OpenAI 식)를 넣고, 정답을 `{"name": …, "arguments": {…}}` 로 학습. 거절은 `irrelevant_function` 을 목록 21번째로.
   새 토큰 없음. 나머지(gemma-2b, train 4,000, full FT, lr·epoch·batch 16, seed 0)는 ours 와 같다 (`src/general.py`, `python -m src.train --format json`)
 - 문장이 약 2,350 토큰(ours 의 약 21배)이라 batch 16 을 4×4 로 나눠 담고, loss 는 정답 자리만 출력층에 통과시켜 계산한다 (값은 같고 메모리만 줄어듦)

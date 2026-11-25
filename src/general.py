@@ -27,6 +27,13 @@
 - 정답 뒤에 Function description 을 붙이지 않는다 (ours 와의 차이. 설명은 이미 프롬프트에 있다)
 - 새 토큰을 추가하지 않는다. gemma 원래 사전 그대로
 
+실험 ND = N+설명 (2026-11-25 추가): ours 에서 함수 토큰만 함수 이름(JSON)으로 바꾼 모델. 학습: train.py --format json --no-list --json-desc
+- 문제 부분: ours(prompt.py) 와 글자까지 같다 (함수 목록 없음, build_prompt(with_list=False))
+- 정답: ` {JSON}` + ours 와 글자까지 같은 `\n\nFunction description: \n{설명 원문}\n\n` + <eos> (build_target(desc=True))
+- 생성: ours 가 <nexa_end> 에서 멈추듯 JSON 뒤 빈 줄("\n\n")에서 멈춘다. G 에도 같은 규칙 (G 정답에는 빈 줄이 없어 채점에 영향 없음)
+- generate/probs 는 모델 폴더의 train_args.json 을 읽어 목록을 넣을지 정한다 (--no-list 로 직접 지정 가능)
+3모델 비교 (EXPERIMENT_DESIGN.md 4.5절): ours → ND (토큰 → 이름) → G (설명을 외우기 → 입력에서 보고 고르기)
+
 거절 점수 (probs)
 - 함수 이름 21개를 하나씩 정답 자리에 넣어 보고, 그 이름(+ 닫는 따옴표)을 쓸 log 확률을 더한다
   → 21개로 softmax = 함수 토큰 모델의 dist 와 같은 모양. probs.jsonl 형식도 probs.py 와 같게 써서
@@ -55,7 +62,7 @@ import sys
 from pathlib import Path
 
 from src.preprocess.prompt import PROMPT_TEMPLATE, load_jsonl
-from src.toy_api import FUNCTIONS, NAME_TO_INDEX
+from src.toy_api import DESCRIPTIONS, FUNCTIONS, NAME_TO_INDEX
 
 NEG_ID = NAME_TO_INDEX["irrelevant_function"]
 END = "<nexa_end>"  # 기존 채점기(evaluate.judge)에 넘길 때만 쓴다. 모델은 이 토큰을 모른다
@@ -95,10 +102,24 @@ _HEAD, _TAIL = PROMPT_TEMPLATE.split("\n\nQuery:")
 assert _TAIL.startswith(" {query}"), PROMPT_TEMPLATE
 GENERAL_TEMPLATE = _HEAD + "\n\nFunctions:\n" + TOOLS_TEXT.replace("{", "{{").replace("}", "}}") + "\n\nQuery:" + _TAIL
 TARGET_PREFIX = ' {"name": "'  # 정답의 앞부분. 함수 이름이 바로 뒤에 온다
+STOP = "\n\n"  # 생성 멈춤 (JSON 은 한 줄이라 안에 빈 줄이 없다)
 
 
-def build_prompt(query: str) -> str:
-    return GENERAL_TEMPLATE.format(query=query)
+def build_prompt(query: str, with_list: bool = True) -> str:
+    """with_list=False (실험 ND): 함수 목록 없이 ours(prompt.py) 와 글자까지 같은 문제 부분.
+    모델은 함수 이름·인자를 학습 데이터에서만 배운다 (ours 가 <nexa_i> 의 뜻을 학습에서만 배우듯)."""
+    return (GENERAL_TEMPLATE if with_list else PROMPT_TEMPLATE).format(query=query)
+
+
+def read_with_list(model_dir, override: bool | None) -> bool:
+    """generate/probs 에서 함수 목록을 넣을지. --no-list 를 주면 False, 아니면 학습 폴더의 train_args.json
+    (train.py 가 저장) 의 no_list 를 따른다. 파일이 없으면 G 로 보고 True. 학습과 다른 프롬프트로 평가하는 실수를 막는다."""
+    if override is not None:
+        return override
+    f = Path(model_dir) / "train_args.json"
+    if f.exists():
+        return not json.loads(f.read_text(encoding="utf-8")).get("no_list", False)
+    return True
 
 
 def target_json(row: dict) -> str:
@@ -108,16 +129,20 @@ def target_json(row: dict) -> str:
     return json.dumps({"name": f["name"], "arguments": args}, ensure_ascii=False)
 
 
-def build_target(row: dict) -> str:
-    return " " + target_json(row)
+def build_target(row: dict, desc: bool = False) -> str:
+    """desc=True (실험 ND): JSON 뒤에 ours(prompt.build_target) 와 글자까지 같은 Function description 부분을 붙인다."""
+    text = " " + target_json(row)
+    if desc:
+        text += "\n\nFunction description: \n" + DESCRIPTIONS[row["token_id"]] + "\n\n"
+    return text
 
 
-def build_example(row: dict, tokenizer) -> dict:
+def build_example(row: dict, tokenizer, with_list: bool = True, desc: bool = False) -> dict:
     """masking.build_example 과 같은 모양 ({"input_ids", "labels"}). 문제 부분은 -100."""
     from src.preprocess.masking import IGNORE_INDEX
 
-    prompt_ids = tokenizer(build_prompt(row["query"]))["input_ids"]
-    target_ids = tokenizer(build_target(row), add_special_tokens=False)["input_ids"] + [tokenizer.eos_token_id]
+    prompt_ids = tokenizer(build_prompt(row["query"], with_list))["input_ids"]
+    target_ids = tokenizer(build_target(row, desc), add_special_tokens=False)["input_ids"] + [tokenizer.eos_token_id]
     return {"input_ids": prompt_ids + target_ids, "labels": [IGNORE_INDEX] * len(prompt_ids) + target_ids}
 
 
@@ -167,14 +192,18 @@ def generate(a) -> None:
     print(f"[생성] {len(test)}개 중 이미 {len(done)}개 → {len(todo)}개 → {a.out}")
     if not todo:
         return
+    with_list = read_with_list(a.model, a.with_list)
+    print(f"[프롬프트] 함수 목록 {'있음 (G)' if with_list else '없음 (ND)'}")
     tokenizer, model, device = load(a.model)
     with a.out.open("a", encoding="utf-8") as f:
         for k, (i, r) in enumerate(todo, 1):
             t0 = time.perf_counter()
-            ids = tokenizer(build_prompt(r["query"]), return_tensors="pt").to(device)
+            ids = tokenizer(build_prompt(r["query"], with_list), return_tensors="pt").to(device)
             with torch.no_grad():
+                # JSON 뒤 빈 줄에서 멈춘다 (ND 는 그 뒤에 설명을 쓰도록 학습됨. ours 가 <nexa_end> 에서 멈추는 것과 같은 뜻)
                 seq = model.generate(**ids, max_new_tokens=a.max_new_tokens, do_sample=False,
-                                     eos_token_id=tokenizer.eos_token_id, pad_token_id=tokenizer.pad_token_id)
+                                     eos_token_id=tokenizer.eos_token_id, pad_token_id=tokenizer.pad_token_id,
+                                     stop_strings=[STOP], tokenizer=tokenizer)
             new = seq[0, ids["input_ids"].shape[1]:]
             raw = tokenizer.decode(new, skip_special_tokens=True)
             # output = 기존 채점기용으로 바꾼 글, raw_output = 모델이 실제로 쓴 JSON
@@ -187,10 +216,10 @@ def generate(a) -> None:
     print(f"[저장] {a.out}")
 
 
-def candidate_ids(tokenizer, query: str) -> tuple[list[int], list[list[int]]]:
+def candidate_ids(tokenizer, query: str, with_list: bool = True) -> tuple[list[int], list[list[int]]]:
     """(공통 앞부분, 함수 21개 각각의 뒷부분) 토큰. 이름+닫는 따옴표까지 붙여 한 번에 토큰화한 뒤
     21개가 공통으로 갖는 앞부분에서 자른다 → 학습 때와 같은 토큰 경계를 쓴다."""
-    texts = [build_prompt(query) + TARGET_PREFIX + f["name"] + '"' for f in FUNCTIONS]
+    texts = [build_prompt(query, with_list) + TARGET_PREFIX + f["name"] + '"' for f in FUNCTIONS]
     full = [tokenizer(t)["input_ids"] for t in texts]
     n = 0
     while all(len(x) > n for x in full) and len({x[n] for x in full}) == 1:
@@ -237,11 +266,13 @@ def probs(a) -> None:
     preds = {p["index"]: p for p in load_jsonl(a.preds)}
     missing = [i for i, _ in todo if i not in preds]
     assert not missing, f"preds 에 없는 index {missing[:5]}... (generate 를 먼저 끝까지)"
+    with_list = read_with_list(a.model, a.with_list)
+    print(f"[프롬프트] 함수 목록 {'있음 (G)' if with_list else '없음 (ND)'}")
     tokenizer, model, device = load(a.model)
     with a.out.open("a", encoding="utf-8") as f:
         for k, (i, r) in enumerate(todo, 1):
             assert preds[i]["query"] == r["query"], f"index {i} 질의가 preds 와 다름"
-            prefix, conts = candidate_ids(tokenizer, r["query"])
+            prefix, conts = candidate_ids(tokenizer, r["query"], with_list)
             logp = score_candidates(model, prefix, conts, device)
             m = max(logp)
             z = sum(math.exp(x - m) for x in logp)
@@ -270,14 +301,16 @@ def stats(a) -> None:
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(a.model)
-    for split in ("train", "test"):
-        rows = load_jsonl(Path(f"data/{split}.jsonl"))
-        lens = sorted(len(build_example(r, tokenizer)["input_ids"]) for r in rows)
-        tl = sorted(len(tokenizer(build_target(r), add_special_tokens=False)["input_ids"]) + 1 for r in rows)
-        print(f"[{split}] {len(rows)}개 | 전체 토큰 최소 {lens[0]} / 중앙 {lens[len(lens) // 2]} / 최대 {lens[-1]}"
-              f" | 정답 부분 중앙 {tl[len(tl) // 2]} / 최대 {tl[-1]}")
-    head = len(tokenizer(build_prompt(""))["input_ids"])
-    print(f"함수 목록 포함 프롬프트 (질의 빼고): {head} 토큰")
+    for name, with_list, desc in (("G", True, False), ("ND", False, True)):
+        print(f"--- {name}: 함수 목록 {'있음' if with_list else '없음'}, 정답 뒤 설명 {'있음' if desc else '없음'}")
+        for split in ("train", "test"):
+            rows = load_jsonl(Path(f"data/{split}.jsonl"))
+            lens = sorted(len(build_example(r, tokenizer, with_list, desc)["input_ids"]) for r in rows)
+            tl = sorted(len(tokenizer(build_target(r, desc), add_special_tokens=False)["input_ids"]) + 1 for r in rows)
+            print(f"[{split}] {len(rows)}개 | 전체 토큰 최소 {lens[0]} / 중앙 {lens[len(lens) // 2]} / 최대 {lens[-1]}"
+                  f" | 정답 부분 중앙 {tl[len(tl) // 2]} / 최대 {tl[-1]}")
+        head = len(tokenizer(build_prompt("", with_list))["input_ids"])
+        print(f"프롬프트 (질의 빼고): {head} 토큰")
 
 
 def show(a) -> None:
@@ -304,6 +337,8 @@ def main() -> None:
         g.add_argument("--out", type=Path, required=True)
         g.add_argument("--limit", type=int, default=None)
         g.add_argument("--max-new-tokens", type=int, default=128)
+        g.add_argument("--no-list", dest="with_list", action="store_const", const=False, default=None,
+                       help="함수 목록 없는 프롬프트 (실험 ND). 안 주면 모델 폴더의 train_args.json 을 따른다")
         if name == "probs":
             g.add_argument("--preds", type=Path, required=True, help="같은 test 로 generate 한 preds.jsonl (greedy 선택·출력을 옮겨 적음)")
     a = p.parse_args()

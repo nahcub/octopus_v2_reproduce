@@ -26,6 +26,10 @@
     # 문장이 약 2,350 토큰이라 batch 16 을 나눠 담는다 (실제 batch = batch-size × grad-accum = 16 그대로)
     python -m src.train --format json --batch-size 4 --grad-accum 4 --gradient-checkpointing \
         --output-dir /content/drive/MyDrive/octopus_v2/runs/G
+
+    # 실험 ND (논문에 없는 추가, N+설명): ours 에서 함수 토큰만 함수 이름(JSON)으로 바꾼 모델.
+    # 프롬프트 = ours 와 같은 문구 (목록 없음), 정답 = JSON + ours 와 같은 Function description
+    python -m src.train --format json --no-list --json-desc --output-dir /content/drive/MyDrive/octopus_v2/runs/ND
 """
 
 from __future__ import annotations
@@ -102,7 +106,7 @@ class OETrainer(Trainer):
 
 
 class AnswerOnlyLossTrainer(Trainer):
-    """(논문에 없는 추가, 실험 G --format json) 프롬프트에 함수 목록이 들어가 문장이 약 2,350 토큰이다.
+    """(논문에 없는 추가, 실험 G·ND --format json. ND 는 문장이 짧아 메모리 이득은 작지만 loss 식이 같으므로 같이 쓴다) 프롬프트에 함수 목록이 들어가 문장이 약 2,350 토큰이다.
     모델 기본 loss 는 모든 자리의 사전 확률(256,000칸)을 만들어서 메모리가 크게 든다 (문장 하나에 수 GB).
     정답 자리만 골라 출력층에 통과시켜 같은 값을 계산한다 (정답 토큰 cross-entropy 를 num_items_in_batch 로 나눔 =
     transformers 기본 causal LM loss 와 같은 식). 계산 결과는 같고 메모리만 줄어든다."""
@@ -165,6 +169,10 @@ def main() -> None:
                    help="(논문에 없는 추가) 실험 X: 이 범주의 negative 를 학습에서 뺀다 (src/neg_categories.SHORT 중 하나)")
     p.add_argument("--format", choices=["token", "json"], default="token",
                    help="(논문에 없는 추가, 실험 G) json: 함수 토큰 없이 프롬프트에 함수 목록을 넣고 JSON 으로 호출 (src/general.py)")
+    p.add_argument("--no-list", action="store_true",
+                   help="(논문에 없는 추가, 실험 ND) --format json 에서 프롬프트의 함수 목록을 뺀다 (문제 부분 = ours 와 같은 문구)")
+    p.add_argument("--json-desc", action="store_true",
+                   help="(논문에 없는 추가, 실험 ND) --format json 에서 정답 JSON 뒤에 ours 와 같은 Function description 을 붙인다")
     p.add_argument("--output-dir", default="runs/full")
     p.add_argument("--epochs", type=float, default=3)
     p.add_argument("--lr", type=float, default=5e-5)
@@ -185,6 +193,7 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     json_format = args.format == "json"
     assert not (json_format and args.neg_loss == "oe"), "--format json 은 --neg-loss token 만 지원"
+    assert json_format or not (args.no_list or args.json_desc), "--no-list·--json-desc 는 --format json 전용"
     nexa_ids = [] if json_format else add_functional_tokens(tokenizer)  # json: 새 토큰 없음, 사전 그대로
     model = load_model(args.model, args.tiny, vocab_size=len(tokenizer) - len(nexa_ids))
     before = model.get_input_embeddings().num_embeddings
@@ -211,7 +220,7 @@ def main() -> None:
     oe = args.neg_loss == "oe"
     if json_format:
         from src.general import build_example as build_json_example
-        examples = [build_json_example(r, tokenizer) for r in rows]
+        examples = [build_json_example(r, tokenizer, with_list=not args.no_list, desc=args.json_desc) for r in rows]
     else:
         examples = [build_example(r, tokenizer, oe=oe) for r in rows]
     n_neg = sum(r["kind"] == "negative" for r in rows)
