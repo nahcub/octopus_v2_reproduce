@@ -183,6 +183,10 @@ def main() -> None:
     p.add_argument("--gradient-checkpointing", action="store_true", help="메모리 절약 (대신 느려짐)")
     p.add_argument("--max-steps", type=int, default=-1, help="시험 학습용. -1 이면 epochs 만큼")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--save-steps", type=int, default=0,
+                   help="(논문에 없는 추가) N step 마다 중간 저장 (옵티마이저 포함 약 30GB, 가장 최근 1개만 남김). 0 이면 저장 안 함")
+    p.add_argument("--resume", action="store_true",
+                   help="output-dir 에 중간 저장이 있으면 거기서 이어서 학습 (같은 옵션으로 다시 실행)")
     p.add_argument("--check-only", action="store_true", help="학습 전 점검만 하고 끝낸다")
     args = p.parse_args()
 
@@ -250,7 +254,10 @@ def main() -> None:
         bf16=use_gpu,
         gradient_checkpointing=args.gradient_checkpointing,
         logging_steps=1 if args.max_steps > 0 else 10,
-        save_strategy="no",  # 중간 저장 안 함: full 학습 체크포인트는 옵티마이저 포함 수십 GB
+        # 기본은 중간 저장 안 함: full 학습 체크포인트는 옵티마이저 포함 수십 GB. --save-steps 를 주면 최근 1개만 남긴다
+        save_strategy="steps" if args.save_steps > 0 else "no",
+        save_steps=args.save_steps if args.save_steps > 0 else 500,
+        save_total_limit=1,
         report_to="none",
         remove_unused_columns=False,  # 우리 collate 가 쓰는 칸을 Trainer 가 지우지 않게
         seed=args.seed,
@@ -263,7 +270,12 @@ def main() -> None:
         trainer = AnswerOnlyLossTrainer(**common)
     else:
         trainer = Trainer(**common)
-    trainer.train()
+    resume = None
+    if args.resume:
+        ckpts = sorted(Path(args.output_dir).glob("checkpoint-*"), key=lambda c: int(c.name.split("-")[1]))
+        resume = str(ckpts[-1]) if ckpts else None
+        print(f"[이어서 학습] {resume or '중간 저장 없음 → 처음부터'}")
+    trainer.train(resume_from_checkpoint=resume)
     if use_gpu:
         print(f"[GPU] 학습 중 최대 메모리 {torch.cuda.max_memory_allocated() / 2**30:.1f} GiB")
 

@@ -322,12 +322,12 @@ ours ──────────────▶ ND ────────�
 | 길이 | 3 epoch = 750 step, 실제 batch 16 |
 | seed | 0 (ours 와 같음) |
 | loss | 정답 부분만, 토큰 가중치 모두 1, 정답 토큰 합 / 묶음 16개 전체의 정답 토큰 수 |
-| 장비 | Colab A100 80GB (ours 와 같은 장비) |
+| 장비 | ours: Colab A100 80GB (기존 결과). ND·G: GPU PC RTX A6000 48GB (2026-11-26 바꿈, 아래 '런타임') |
 | 평가 | 같은 test 파일, greedy, batch 1, `max_new_tokens` 128, 같은 채점기(`src.evaluate score`) |
 
   - 계산 결과가 같아서 모델마다 달라도 되는 것: batch 16 을 나눠 담는 방식(`--batch-size × --grad-accum = 16`), gradient checkpointing,
     JSON 모델의 정답 자리만 출력층에 통과시키는 loss 계산(`AnswerOnlyLossTrainer`, 기본 loss 와 차이 1e-6 확인).
-    G 는 문장이 길어 `--batch-size 4 --grad-accum 4 --gradient-checkpointing`. ND 는 문장 길이가 ours 와 비슷해서 (최대 374 / ours 351 토큰) ours 처럼 batch 16 한 번에
+    A6000 에서는 ND `--batch-size 2 --grad-accum 8` (4×4 는 설명 부분이 붙어 OOM, 2026-11-26), G `--batch-size 2 --grad-accum 8 --gradient-checkpointing` (2026-11-25 30 step 시험)
   - 실제로 다른 것 (방식 자체의 차이라 통제하지 않음): 새 토큰 22개 추가 여부, 정답 글자 수 (JSON 이 토큰보다 길다), G 의 입력 길이
 - **ND 확인 (2026-11-25, train 4,000개 전체)**: 문제 부분 == ours 글자·토큰 4,000/4,000, 정답 뒤 설명 부분 == ours 토큰 4,000/4,000,
   따로 토큰화 == 한 번에 토큰화 4,000/4,000, G 학습 데이터는 바뀌지 않음 4,000/4,000. 정답 JSON 안에 빈 줄이 있는 문항 0개 (train·test·말투 test).
@@ -360,10 +360,14 @@ ours ──────────────▶ ND ────────�
   ToolkenGPT (NeurIPS 2023) 는 설명 없이 예시만, ToolGen (ICLR 2025) 은 설명 → 토큰 별도 학습 단계, Toolken+ (EMNLP 2024 Findings) 는 후보의 설명을 입력에 넣어 다시 고름 + 거절(Reject) 옵션.
   G 는 설명을 입력에 넣는 일반적인 방식
 - **한계**: 형식(JSON) 하나만 시험한다. 여유가 있으면 파이썬 호출 모양으로도 한 번 돌려 결론이 같은지 본다.
-  seed 0 한 번이라 차이가 작으면 seed 변동과 구분하기 어렵다 (필요하면 세 모델 모두 seed 1·2 추가)
-- **런타임**: Colab A100 80GB (ours 와 같은 장비). GPU PC(RTX A6000 48GB) 는 코드 확인용. A6000 에서는 ours 조건(`adamw_torch`, batch 16)이
-  메모리에 들어가지 않아 (2026-11-25 시험: 옵티마이저 갱신 단계에서 OOM) 최종 학습에 쓰지 않는다. 참고로 A6000 에서 `adamw_torch_fused` 로 잰 30 step:
-  G 42초/step (batch 2×8, gradient checkpointing, 최대 43.3 GiB) → 750 step 약 9시간. A100 은 이보다 빠를 것으로 추정 → 노트북 2번 시험 학습에서 먼저 잰다
+  seed 0 한 번이라 차이가 작으면 seed 변동과 구분하기 어렵다 (필요하면 세 모델 모두 seed 1·2 추가).
+  ours (A100, `adamw_torch`) 와 ND·G (A6000, `adamw_torch_fused`) 는 장비·옵티마이저 구현이 다르다 (계산 오차 수준, 추정)
+- **런타임 (2026-11-26 바꿈)**: ND·G 는 GPU PC(RTX A6000 48GB ×2, 한 장에 한 모델)에서 학습. ours 는 다시 학습하지 않고 A100 결과를 쓴다.
+  A6000 에서는 `adamw_torch`(foreach) 가 옵티마이저 갱신 단계에서 OOM (2026-11-25 시험) 이라 `--optim adamw_torch_fused` 를 쓴다 (논문에 없는 추가).
+  같은 AdamW 공식에 구현만 달라 차이는 계산 오차 수준 (추정). 정답률·거절을 보는 실험이라 장비·구현 차이는 seed 흔들림과 같은 종류의 작은 잡음으로 보고 한계에 적는다.
+  Windows 드라이버가 VRAM 이 넘치면 시스템 RAM 으로 넘겨 매우 느려지므로 `torch.cuda.set_per_process_memory_fraction(0.97)` 로 한도를 건다 (스크립트 `runs/logs/run_local.sh`, git 제외).
+  A6000 30 step 시험: ND 계열 약 1.7초/step → 750 step 약 25분, G 42초/step (최대 43.3 GiB) → 약 9시간. `--save-steps` 로 중간 저장 (ND 250, G 50 step 마다, 최근 1개만, 약 30GB), 끊기면 `--resume` 으로 이어서 (논문에 없는 추가).
+  2026-11-26 ND·G 를 GPU 두 장에서 동시에 돌리다 GPU 1 이 "GPU is lost" 로 떨어짐 (G 11 step 째) → 재부팅 뒤 GPU 0 한 장으로 ND → G 차례로 (`runs/logs/run_all.sh`)
 
 ## 5. 실험 B: 내용 (Q2)
 
@@ -471,3 +475,4 @@ negative 개수 2,000, 비율 50%, positive 고정. **바뀌는 건 negative 의
 | 2026-11-22 | 실험 S 추가 (4.4절): 같은 문장을 말투 5가지로 다시 써서 학습·채점. 예측과 판정 규칙을 돌리기 전에 기록 | 실험 X 결과를 본 뒤. 거절이 의미보다 말투에 기대는지 (사용자 예측) vs 말투를 넓히면 처음 보는 말투에도 일반화되는지 가르려고 |
 | 2026-11-25 | 실험 G 추가 (4.5절): 함수 토큰 대신 JSON 출력 일반 모델. 코드 `src/general.py`, `src/train.py --format json`, 노트북 13. 판정 규칙·예측을 돌리기 전에 기록 | 논문 주장의 범위(함수 토큰 특유 vs 함수 호출 모델 공통)를 정하려고. 기준 모델 학습 방식은 full FT 로 확인 (2절 표의 "LoRA" 표기와 실제 학습이 달라 확인함) |
 | 2026-11-25 | 실험 ND (N+설명) 추가, 4.5절을 ours·ND·G 3모델 비교로: ND = ours 에서 함수 토큰만 함수 이름(JSON)으로 바꿈 (`--format json --no-list --json-desc`). 판정은 ours vs G 를 주 비교로 두고 "다르다" 일 때 ours vs ND, ND vs G 로 원인을 나눔. ND·G 생성은 JSON 뒤 빈 줄에서 멈춤. 통제 조건 표 추가 | G 하나로는 토큰 vs 이름과 설명 외우기 vs 보고 고르기를 못 가른다. 어떤 모델도 학습·채점하기 전의 변경 |
+| 2026-11-26 | ND·G 학습 장비를 Colab A100 → GPU PC A6000 으로, 옵티마이저 `adamw_torch_fused` (A6000 에서 `adamw_torch` 는 OOM). ours 는 A100 결과 그대로. `src/train.py` 에 `--save-steps`·`--resume` 추가 (중간 저장·이어서 학습) | 정답률을 보는 실험이라 장비 차이는 계산 오차 수준으로 보고 한계에 적음 |
